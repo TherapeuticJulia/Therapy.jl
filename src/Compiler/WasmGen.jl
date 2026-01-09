@@ -1,11 +1,13 @@
 # WasmGen.jl - Generate WebAssembly from component analysis
 #
 # Uses WasmTarget.jl to compile the reactive logic to Wasm
+# Now with direct IR compilation via compile_closure_body!
 
 using WasmTarget
 using WasmTarget: WasmModule, add_import!, add_function!, add_export!,
                   add_global!, add_global_export!, to_bytes,
-                  I32, I64, F32, F64, ExternRef, Opcode
+                  compile_closure_body, TypeRegistry,
+                  I32, I64, F32, F64, ExternRef, Opcode, NumType
 
 """
 Result of Wasm generation.
@@ -64,15 +66,26 @@ function generate_wasm(analysis::ComponentAnalysis)
         initial = signal.initial_value
 
         # Determine Wasm type and create global
-        if signal.type <: Integer
+        # Match the actual Julia type to avoid type mismatches in handlers
+        if signal.type == Int32 || signal.type == UInt32
             global_idx = add_global!(mod, I32, true, Int32(initial))
             signal_globals[signal.id] = global_idx
-        elseif signal.type <: AbstractFloat
+        elseif signal.type == Int64 || signal.type == UInt64 || signal.type == Int
+            global_idx = add_global!(mod, I64, true, Int64(initial))
+            signal_globals[signal.id] = global_idx
+        elseif signal.type == Float32
+            global_idx = add_global!(mod, F32, true, Float32(initial))
+            signal_globals[signal.id] = global_idx
+        elseif signal.type == Float64
             global_idx = add_global!(mod, F64, true, Float64(initial))
             signal_globals[signal.id] = global_idx
         else
-            # Default to i32 for other types
-            global_idx = add_global!(mod, I32, true, Int32(0))
+            # Default to i64 for other integer types, i32 for bool
+            if signal.type == Bool
+                global_idx = add_global!(mod, I32, true, Int32(initial ? 1 : 0))
+            else
+                global_idx = add_global!(mod, I64, true, Int64(0))
+            end
             signal_globals[signal.id] = global_idx
         end
 
@@ -91,154 +104,62 @@ function generate_wasm(analysis::ComponentAnalysis)
     for signal in analysis.signals
         global_idx = signal_globals[signal.id]
 
-        if signal.type <: Integer
-            # get_signal_N() -> i32
-            get_code = UInt8[
-                Opcode.GLOBAL_GET, UInt8(global_idx),
-                Opcode.END
-            ]
-            get_idx = add_function!(mod, no_params, [I32], no_locals, get_code)
-            add_export!(mod, "get_signal_$(signal.id)", 0x00, get_idx)
-            push!(exports, "get_signal_$(signal.id)")
-
-            # set_signal_N(value: i32)
-            set_code = UInt8[
-                Opcode.LOCAL_GET, 0x00,
-                Opcode.GLOBAL_SET, UInt8(global_idx),
-                Opcode.END
-            ]
-            set_idx = add_function!(mod, [I32], no_results, no_locals, set_code)
-            add_export!(mod, "set_signal_$(signal.id)", 0x00, set_idx)
-            push!(exports, "set_signal_$(signal.id)")
+        # Determine the Wasm type for this signal
+        wasm_type = if signal.type == Int32 || signal.type == UInt32 || signal.type == Bool
+            I32
+        elseif signal.type == Int64 || signal.type == UInt64 || signal.type == Int
+            I64
+        elseif signal.type == Float32
+            F32
+        elseif signal.type == Float64
+            F64
+        else
+            I64  # Default to i64 for unknown integer types
         end
+
+        # get_signal_N() -> wasm_type
+        get_code = UInt8[
+            Opcode.GLOBAL_GET, UInt8(global_idx),
+            Opcode.END
+        ]
+        get_idx = add_function!(mod, no_params, [wasm_type], no_locals, get_code)
+        add_export!(mod, "get_signal_$(signal.id)", 0x00, get_idx)
+        push!(exports, "get_signal_$(signal.id)")
+
+        # set_signal_N(value: wasm_type)
+        set_code = UInt8[
+            Opcode.LOCAL_GET, 0x00,
+            Opcode.GLOBAL_SET, UInt8(global_idx),
+            Opcode.END
+        ]
+        set_idx = add_function!(mod, [wasm_type], no_results, no_locals, set_code)
+        add_export!(mod, "set_signal_$(signal.id)", 0x00, set_idx)
+        push!(exports, "set_signal_$(signal.id)")
     end
 
     # =========================================================================
-    # EVENT HANDLERS - Generated from traced operations
+    # EVENT HANDLERS - Direct IR compilation with fallback to tracing
     # =========================================================================
 
+    # Create type registry for direct compilation
+    type_registry = TypeRegistry()
+
+    # Build DOM bindings map for all signals (used by direct IR compilation)
+    # Maps global_idx -> [(import_idx, const_args), ...]
+    dom_bindings = build_dom_bindings(analysis, signal_globals)
+
     for handler in analysis.handlers
-        handler_code = UInt8[]
-
-        # Track which signals are modified so we can update their DOM bindings
-        modified_signals = Set{UInt64}()
-
-        # Generate code for each traced operation
-        for op in handler.operations
-            if !haskey(signal_globals, op.signal_id)
-                continue  # Signal not found, skip
-            end
-
-            global_idx = signal_globals[op.signal_id]
-            push!(modified_signals, op.signal_id)
-
-            # Generate Wasm code based on operation type
-            if op.operation == OP_INCREMENT
-                # signal = signal + 1
-                append!(handler_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.I32_CONST, 0x01,
-                    Opcode.I32_ADD,
-                    Opcode.GLOBAL_SET, UInt8(global_idx),
-                ])
-            elseif op.operation == OP_DECREMENT
-                # signal = signal - 1
-                append!(handler_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.I32_CONST, 0x01,
-                    Opcode.I32_SUB,
-                    Opcode.GLOBAL_SET, UInt8(global_idx),
-                ])
-            elseif op.operation == OP_ADD
-                # signal = signal + n
-                append!(handler_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
-                append!(handler_code, [Opcode.I32_CONST])
-                append!(handler_code, encode_leb128_signed(Int(op.operand)))
-                append!(handler_code, [Opcode.I32_ADD, Opcode.GLOBAL_SET, UInt8(global_idx)])
-            elseif op.operation == OP_SUB
-                # signal = signal - n
-                append!(handler_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
-                append!(handler_code, [Opcode.I32_CONST])
-                append!(handler_code, encode_leb128_signed(Int(op.operand)))
-                append!(handler_code, [Opcode.I32_SUB, Opcode.GLOBAL_SET, UInt8(global_idx)])
-            elseif op.operation == OP_MUL
-                # signal = signal * n
-                append!(handler_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
-                append!(handler_code, [Opcode.I32_CONST])
-                append!(handler_code, encode_leb128_signed(Int(op.operand)))
-                append!(handler_code, [Opcode.I32_MUL, Opcode.GLOBAL_SET, UInt8(global_idx)])
-            elseif op.operation == OP_SET
-                # signal = constant
-                append!(handler_code, [Opcode.I32_CONST])
-                append!(handler_code, encode_leb128_signed(Int(op.operand)))
-                append!(handler_code, [Opcode.GLOBAL_SET, UInt8(global_idx)])
-            elseif op.operation == OP_NEGATE
-                # signal = -signal
-                append!(handler_code, [
-                    Opcode.I32_CONST, 0x00,
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.I32_SUB,
-                    Opcode.GLOBAL_SET, UInt8(global_idx),
-                ])
-            elseif op.operation == OP_TOGGLE
-                # signal = (signal == 0) ? 1 : 0
-                # i32.eqz returns 1 if value is 0, 0 otherwise
-                append!(handler_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.I32_EQZ,
-                    Opcode.GLOBAL_SET, UInt8(global_idx),
-                ])
-            end
+        # Direct IR compilation - no fallback, errors are visible
+        if handler.handler_ir !== nothing
+            handler_code, handler_locals = compile_handler_direct(
+                handler, analysis, signal_globals, dom_bindings, mod, type_registry
+            )
+            handler_idx = add_function!(mod, no_params, no_results, handler_locals, handler_code)
+            add_export!(mod, "handler_$(handler.id)", 0x00, handler_idx)
+            push!(exports, "handler_$(handler.id)")
+        else
+            error("Handler $(handler.id) has no IR - cannot compile. Direct IR compilation is required.")
         end
-
-        # Update DOM for all modified signals
-        for signal_id in modified_signals
-            global_idx = signal_globals[signal_id]
-            bindings_for_signal = filter(b -> b.signal_id == signal_id, analysis.bindings)
-
-            for binding in bindings_for_signal
-                append!(handler_code, [Opcode.I32_CONST])
-                append!(handler_code, encode_leb128_unsigned(binding.target_hk))
-                append!(handler_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.CALL, 0x00,  # call update_text_i32 (import idx 0)
-                ])
-            end
-
-            # Update Show visibility for signals that control Show conditions
-            shows_for_signal = filter(s -> s.signal_id == signal_id, analysis.show_nodes)
-            for show in shows_for_signal
-                # set_visible(hk, signal != 0)
-                append!(handler_code, [Opcode.I32_CONST])
-                append!(handler_code, encode_leb128_unsigned(show.target_hk))
-                # Convert signal value to bool: (signal != 0) ? 1 : 0
-                append!(handler_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.I32_CONST, 0x00,
-                    Opcode.I32_NE,  # Compare not equal to 0 -> 1 if truthy, 0 if falsy
-                    Opcode.CALL, 0x03,  # call set_visible (import idx 3)
-                ])
-            end
-
-            # Update theme (dark mode) for signals that control theme
-            theme_for_signal = filter(t -> t.signal_id == signal_id, analysis.theme_bindings)
-            for _theme in theme_for_signal
-                # set_dark_mode(signal != 0)
-                # Convert signal value to bool: (signal != 0) ? 1 : 0
-                append!(handler_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.I32_CONST, 0x00,
-                    Opcode.I32_NE,  # Compare not equal to 0 -> 1 if truthy, 0 if falsy
-                    Opcode.CALL, 0x04,  # call set_dark_mode (import idx 4)
-                ])
-            end
-        end
-
-        append!(handler_code, [Opcode.END])
-
-        handler_idx = add_function!(mod, no_params, no_results, no_locals, handler_code)
-        add_export!(mod, "handler_$(handler.id)", 0x00, handler_idx)
-        push!(exports, "handler_$(handler.id)")
     end
 
     # =========================================================================
@@ -353,4 +274,218 @@ function encode_leb128_signed(value::Int)::Vector{UInt8}
         push!(result, byte)
     end
     return result
+end
+
+# ============================================================================
+# Direct IR Compilation Support
+# ============================================================================
+
+"""
+Build DOM bindings map for all signals.
+
+Returns a Dict mapping global_idx -> [(import_idx, const_args), ...]
+This tells the compiler what DOM updates to inject after signal writes.
+
+Import indices:
+- 0: update_text_i32(hk, value)
+- 1: update_text_f64(hk, value)
+- 2: update_attr(hk, attr, value)
+- 3: set_visible(hk, visible)
+- 4: set_dark_mode(enabled)
+"""
+function build_dom_bindings(analysis::ComponentAnalysis, signal_globals::Dict{UInt64, Int})
+    dom_bindings = Dict{UInt32, Vector{Tuple{UInt32, Vector{Int32}}}}()
+
+    for (signal_id, global_idx) in signal_globals
+        bindings_list = Tuple{UInt32, Vector{Int32}}[]
+
+        # Text bindings: update_text_i32(hk, value) - import idx 0
+        for binding in filter(b -> b.signal_id == signal_id && b.attribute === nothing, analysis.bindings)
+            push!(bindings_list, (UInt32(0), Int32[binding.target_hk]))
+        end
+
+        # Show bindings: set_visible(hk, value) - import idx 3
+        for show in filter(s -> s.signal_id == signal_id, analysis.show_nodes)
+            push!(bindings_list, (UInt32(3), Int32[show.target_hk]))
+        end
+
+        # Theme bindings: set_dark_mode(value) - import idx 4
+        for _theme in filter(t -> t.signal_id == signal_id, analysis.theme_bindings)
+            push!(bindings_list, (UInt32(4), Int32[]))
+        end
+
+        if !isempty(bindings_list)
+            dom_bindings[UInt32(global_idx)] = bindings_list
+        end
+    end
+
+    return dom_bindings
+end
+
+"""
+Compile a handler using direct IR compilation (WasmTarget's compile_closure_body).
+
+Returns (bytecode, locals) tuple. Errors are not caught - they propagate for visibility.
+"""
+function compile_handler_direct(
+    handler::AnalyzedHandler,
+    analysis::ComponentAnalysis,
+    signal_globals::Dict{UInt64, Int},
+    dom_bindings::Dict{UInt32, Vector{Tuple{UInt32, Vector{Int32}}}},
+    mod::WasmModule,
+    type_registry::TypeRegistry
+)
+    ir = handler.handler_ir
+
+    # Build captured_signal_fields from the closure
+    # Maps field_name -> (is_getter, global_idx)
+    captured_signal_fields = Dict{Symbol, Tuple{Bool, UInt32}}()
+    closure_type = typeof(ir.closure)
+    field_names = fieldnames(closure_type)
+
+    # Map getters: field_idx -> signal_id -> global_idx
+    for (field_idx, signal_id) in ir.captured_getters
+        if haskey(signal_globals, signal_id)
+            field_name = field_names[field_idx]
+            global_idx = UInt32(signal_globals[signal_id])
+            captured_signal_fields[field_name] = (true, global_idx)  # is_getter=true
+        end
+    end
+
+    # Map setters: field_idx -> signal_id -> global_idx
+    for (field_idx, signal_id) in ir.captured_setters
+        if haskey(signal_globals, signal_id)
+            field_name = field_names[field_idx]
+            global_idx = UInt32(signal_globals[signal_id])
+            captured_signal_fields[field_name] = (false, global_idx)  # is_getter=false
+        end
+    end
+
+    # Compile the closure body - no try/catch, errors propagate
+    body, locals = compile_closure_body(
+        ir.closure,
+        captured_signal_fields,
+        mod,
+        type_registry;
+        dom_bindings = dom_bindings
+    )
+
+    return (body, locals)
+end
+
+"""
+Compile a handler using tracing-based compilation (fallback).
+
+Returns bytecode for the handler function.
+"""
+function compile_handler_traced(
+    handler::AnalyzedHandler,
+    analysis::ComponentAnalysis,
+    signal_globals::Dict{UInt64, Int}
+)
+    handler_code = UInt8[]
+
+    # Track which signals are modified so we can update their DOM bindings
+    modified_signals = Set{UInt64}()
+
+    # Generate code for each traced operation
+    for op in handler.operations
+        if !haskey(signal_globals, op.signal_id)
+            continue  # Signal not found, skip
+        end
+
+        global_idx = signal_globals[op.signal_id]
+        push!(modified_signals, op.signal_id)
+
+        # Generate Wasm code based on operation type
+        if op.operation == OP_INCREMENT
+            append!(handler_code, [
+                Opcode.GLOBAL_GET, UInt8(global_idx),
+                Opcode.I32_CONST, 0x01,
+                Opcode.I32_ADD,
+                Opcode.GLOBAL_SET, UInt8(global_idx),
+            ])
+        elseif op.operation == OP_DECREMENT
+            append!(handler_code, [
+                Opcode.GLOBAL_GET, UInt8(global_idx),
+                Opcode.I32_CONST, 0x01,
+                Opcode.I32_SUB,
+                Opcode.GLOBAL_SET, UInt8(global_idx),
+            ])
+        elseif op.operation == OP_ADD
+            append!(handler_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
+            append!(handler_code, [Opcode.I32_CONST])
+            append!(handler_code, encode_leb128_signed(Int(op.operand)))
+            append!(handler_code, [Opcode.I32_ADD, Opcode.GLOBAL_SET, UInt8(global_idx)])
+        elseif op.operation == OP_SUB
+            append!(handler_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
+            append!(handler_code, [Opcode.I32_CONST])
+            append!(handler_code, encode_leb128_signed(Int(op.operand)))
+            append!(handler_code, [Opcode.I32_SUB, Opcode.GLOBAL_SET, UInt8(global_idx)])
+        elseif op.operation == OP_MUL
+            append!(handler_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
+            append!(handler_code, [Opcode.I32_CONST])
+            append!(handler_code, encode_leb128_signed(Int(op.operand)))
+            append!(handler_code, [Opcode.I32_MUL, Opcode.GLOBAL_SET, UInt8(global_idx)])
+        elseif op.operation == OP_SET
+            append!(handler_code, [Opcode.I32_CONST])
+            append!(handler_code, encode_leb128_signed(Int(op.operand)))
+            append!(handler_code, [Opcode.GLOBAL_SET, UInt8(global_idx)])
+        elseif op.operation == OP_NEGATE
+            append!(handler_code, [
+                Opcode.I32_CONST, 0x00,
+                Opcode.GLOBAL_GET, UInt8(global_idx),
+                Opcode.I32_SUB,
+                Opcode.GLOBAL_SET, UInt8(global_idx),
+            ])
+        elseif op.operation == OP_TOGGLE
+            append!(handler_code, [
+                Opcode.GLOBAL_GET, UInt8(global_idx),
+                Opcode.I32_EQZ,
+                Opcode.GLOBAL_SET, UInt8(global_idx),
+            ])
+        end
+    end
+
+    # Update DOM for all modified signals
+    for signal_id in modified_signals
+        global_idx = signal_globals[signal_id]
+        bindings_for_signal = filter(b -> b.signal_id == signal_id, analysis.bindings)
+
+        for binding in bindings_for_signal
+            append!(handler_code, [Opcode.I32_CONST])
+            append!(handler_code, encode_leb128_unsigned(binding.target_hk))
+            append!(handler_code, [
+                Opcode.GLOBAL_GET, UInt8(global_idx),
+                Opcode.CALL, 0x00,  # call update_text_i32 (import idx 0)
+            ])
+        end
+
+        # Update Show visibility
+        shows_for_signal = filter(s -> s.signal_id == signal_id, analysis.show_nodes)
+        for show in shows_for_signal
+            append!(handler_code, [Opcode.I32_CONST])
+            append!(handler_code, encode_leb128_unsigned(show.target_hk))
+            append!(handler_code, [
+                Opcode.GLOBAL_GET, UInt8(global_idx),
+                Opcode.I32_CONST, 0x00,
+                Opcode.I32_NE,
+                Opcode.CALL, 0x03,  # call set_visible (import idx 3)
+            ])
+        end
+
+        # Update theme
+        theme_for_signal = filter(t -> t.signal_id == signal_id, analysis.theme_bindings)
+        for _theme in theme_for_signal
+            append!(handler_code, [
+                Opcode.GLOBAL_GET, UInt8(global_idx),
+                Opcode.I32_CONST, 0x00,
+                Opcode.I32_NE,
+                Opcode.CALL, 0x04,  # call set_dark_mode (import idx 4)
+            ])
+        end
+    end
+
+    append!(handler_code, [Opcode.END])
+    return handler_code
 end

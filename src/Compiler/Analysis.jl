@@ -5,6 +5,13 @@
 # - Event handlers defined
 # - DOM structure with signal bindings
 
+# Helper to check if something is a signal getter (Function or SignalGetter struct)
+is_signal_getter(x) = x isa Function || x isa SignalGetter
+# Helper to check if something is a signal setter (Function or SignalSetter struct)
+is_signal_setter(x) = x isa Function || x isa SignalSetter
+# Helper to check if something is callable (for event handlers)
+is_handler(x) = x isa Function
+
 """
 Represents a signal discovered during component analysis.
 """
@@ -89,8 +96,8 @@ struct ComponentAnalysis
     vnode::Any
     html::String
     # Maps for direct compilation
-    getter_map::Dict{Function, UInt64}   # signal getter -> signal_id
-    setter_map::Dict{Function, UInt64}   # signal setter -> signal_id
+    getter_map::Dict{Any, UInt64}   # signal getter -> signal_id
+    setter_map::Dict{Any, UInt64}   # signal setter -> signal_id
 end
 
 """
@@ -134,7 +141,7 @@ function analyze_component(component_fn::Function)
     end
 
     # Build setter map for input binding detection
-    setter_map = Dict{Function, UInt64}()
+    setter_map = Dict{Any, UInt64}()
     for s in raw_signals
         setter_map[s.setter] = s.id
     end
@@ -210,7 +217,7 @@ function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_no
                     push!(handlers, (handler_counter[], key, hk, value))
                 end
             end
-        elseif key == :dark_mode && value isa Function
+        elseif key == :dark_mode && is_signal_getter(value)
             # Theme binding - signal controls dark/light mode
             signal_id = get(getter_map, value, nothing)
             if signal_id !== nothing
@@ -219,7 +226,7 @@ function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_no
                     push!(theme_bindings, AnalyzedThemeBinding(signal_id))
                 end
             end
-        elseif value isa Function
+        elseif is_signal_getter(value)
             # Check if it's a signal getter (use local getter_map, not global)
             signal_id = get(getter_map, value, nothing)
             if signal_id !== nothing
@@ -240,7 +247,7 @@ function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_no
             analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         elseif child isa Fragment
             analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
-        elseif child isa Function
+        elseif is_signal_getter(child)
             # Check if it's a signal getter (use local getter_map, not global)
             signal_id = get(getter_map, child, nothing)
             if signal_id !== nothing
@@ -487,7 +494,7 @@ Returns HandlerIR with:
 
 Returns nothing if IR extraction fails (e.g., not a closure).
 """
-function extract_handler_ir(handler::Function, getter_map::Dict{Function, UInt64}, setter_map::Dict{Function, UInt64})::Union{HandlerIR, Nothing}
+function extract_handler_ir(handler::Function, getter_map::Dict{Any, UInt64}, setter_map::Dict{Any, UInt64})::Union{HandlerIR, Nothing}
     try
         # Get the typed IR for the closure (called with no arguments)
         typed_results = Base.code_typed(handler, ())

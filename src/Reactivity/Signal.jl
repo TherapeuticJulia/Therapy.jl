@@ -11,7 +11,7 @@ end
 # Analysis mode tracking (set by Compiler/Analysis.jl)
 const SIGNAL_ANALYSIS_MODE = Ref{Bool}(false)
 const ANALYZED_SIGNALS = Ref{Vector{Any}}(Any[])
-const SIGNAL_GETTER_MAP = Ref{Dict{Function, UInt64}}(Dict{Function, UInt64}())
+const SIGNAL_GETTER_MAP = Ref{Dict{Any, UInt64}}(Dict{Any, UInt64}())
 
 # Handler tracing mode - records what operations handlers perform
 const HANDLER_TRACING_MODE = Ref{Bool}(false)
@@ -101,7 +101,7 @@ Enable signal analysis mode.
 function enable_signal_analysis!()
     SIGNAL_ANALYSIS_MODE[] = true
     ANALYZED_SIGNALS[] = Any[]
-    SIGNAL_GETTER_MAP[] = Dict{Function, UInt64}()
+    SIGNAL_GETTER_MAP[] = Dict{Any, UInt64}()
 end
 
 """
@@ -112,7 +112,7 @@ function disable_signal_analysis!()
     signals = ANALYZED_SIGNALS[]
     getter_map = SIGNAL_GETTER_MAP[]
     ANALYZED_SIGNALS[] = Any[]
-    SIGNAL_GETTER_MAP[] = Dict{Function, UInt64}()
+    SIGNAL_GETTER_MAP[] = Dict{Any, UInt64}()
     return signals, getter_map
 end
 
@@ -122,10 +122,66 @@ Check if we're in signal analysis mode.
 is_signal_analysis_mode() = SIGNAL_ANALYSIS_MODE[]
 
 """
-Get the signal ID for a getter function (during analysis).
+Get the signal ID for a getter (during analysis).
 """
-function get_signal_id_for_getter(getter::Function)
+function get_signal_id_for_getter(getter)
     get(SIGNAL_GETTER_MAP[], getter, nothing)
+end
+
+# ============================================================================
+# Struct-based Signal Accessors
+# ============================================================================
+# These are callable structs that:
+# 1. Work like functions (getter() and setter(val))
+# 2. Have a :signal field for WasmTarget pattern matching
+# 3. Are @noinline to prevent Julia from inlining their bodies
+# This enables direct Wasm compilation without tracing.
+
+"""
+Signal getter struct - callable, has :signal field, doesn't inline.
+"""
+struct SignalGetter{T}
+    signal::Signal{T}
+end
+
+"""
+Read the signal value with effect tracking.
+@noinline prevents Julia from inlining this, keeping IR clean for Wasm.
+"""
+@noinline function (g::SignalGetter{T})()::T where T
+    # Track dependency if inside an effect
+    effect = current_effect()
+    if effect !== nothing
+        push!(g.signal.subscribers, effect)
+        push!(effect.dependencies, g.signal)
+    end
+    return g.signal.value
+end
+
+"""
+Signal setter struct - callable, has :signal field, doesn't inline.
+"""
+struct SignalSetter{T}
+    signal::Signal{T}
+end
+
+"""
+Write the signal value with tracing and notification.
+@noinline prevents Julia from inlining this, keeping IR clean for Wasm.
+"""
+@noinline function (s::SignalSetter{T})(new_value)::T where T
+    old_value = s.signal.value
+
+    # Record operation if in handler tracing mode
+    if is_handler_tracing()
+        record_traced_operation!(s.signal.id, old_value, new_value)
+    end
+
+    if old_value != new_value
+        s.signal.value = new_value
+        notify_subscribers!(s.signal)
+    end
+    return new_value
 end
 
 """
@@ -133,7 +189,7 @@ end
 
 Create a new reactive signal with an initial value.
 
-Returns a tuple of (getter, setter) functions:
+Returns a tuple of (getter, setter) callable structs:
 - `getter()`: Returns the current value and tracks dependencies
 - `setter(value)`: Updates the value and notifies subscribers
 
@@ -144,37 +200,18 @@ count()           # => 0
 set_count(5)
 count()           # => 5
 ```
+
+Implementation note: The getter and setter are struct-based callables
+(not closures) with @noinline methods. This produces clean IR that
+WasmTarget can compile directly without tracing.
 """
 function create_signal(initial::T) where T
     signal = Signal{T}(next_signal_id(), initial, Set{Any}())
 
-    # Getter function - reads value and tracks dependency
-    getter = function()
-        # Track dependency if inside an effect
-        effect = current_effect()
-        if effect !== nothing
-            push!(signal.subscribers, effect)
-            # Also register this signal as a dependency of the effect
-            push!(effect.dependencies, signal)
-        end
-        return signal.value
-    end
-
-    # Setter function - updates value and notifies
-    setter = function(new_value)
-        old_value = signal.value
-
-        # Record operation if in handler tracing mode
-        if is_handler_tracing()
-            record_traced_operation!(signal.id, old_value, new_value)
-        end
-
-        if old_value != new_value
-            signal.value = new_value
-            notify_subscribers!(signal)
-        end
-        return new_value
-    end
+    # Use struct-based accessors instead of closures
+    # These produce clean IR for Wasm compilation
+    getter = SignalGetter{T}(signal)
+    setter = SignalSetter{T}(signal)
 
     # Record signal if in analysis mode
     if is_signal_analysis_mode()

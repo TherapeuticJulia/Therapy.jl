@@ -21,14 +21,15 @@ This demonstrates Therapy.jl's Leptos-style reactivity:
 """
 function InteractiveCounter()
     # Create reactive state - this becomes a Wasm global
-    count, set_count = create_signal(0)
+    # Use Int32 explicitly for Wasm compatibility (DOM updates expect i32)
+    count, set_count = create_signal(Int32(0))
 
     # Return the component tree
     # The :on_click closures are compiled to Wasm handler functions
     Div(:class => "flex justify-center items-center gap-6",
         # Decrement button - compiled to: global.get, i32.const 1, i32.sub, global.set
         Button(:class => "w-12 h-12 rounded-full bg-white text-indigo-600 text-2xl font-bold hover:bg-indigo-100 transition",
-               :on_click => () -> set_count(count() - 1),
+               :on_click => () -> set_count(count() - Int32(1)),
                "-"),
 
         # Display - automatically updates when count changes
@@ -38,7 +39,7 @@ function InteractiveCounter()
 
         # Increment button - compiled to: global.get, i32.const 1, i32.add, global.set
         Button(:class => "w-12 h-12 rounded-full bg-white text-indigo-600 text-2xl font-bold hover:bg-indigo-100 transition",
-               :on_click => () -> set_count(count() + 1),
+               :on_click => () -> set_count(count() + Int32(1)),
                "+")
     )
 end

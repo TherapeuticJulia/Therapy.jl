@@ -153,6 +153,17 @@ function render_html!(io::IO, node::Function, ctx::SSRContext)
     render_html!(io, result, ctx)
 end
 
+function render_html!(io::IO, node::SignalGetter, ctx::SSRContext)
+    # Call signal getter and render its value
+    result = node()
+    render_html!(io, result, ctx)
+end
+
+function render_html!(io::IO, node::SignalSetter, ctx::SSRContext)
+    # Setters shouldn't be rendered as content, but handle gracefully
+    # This shouldn't normally happen in well-formed templates
+end
+
 function render_html!(io::IO, node::Vector, ctx::SSRContext)
     for child in node
         render_html!(io, child, ctx)
