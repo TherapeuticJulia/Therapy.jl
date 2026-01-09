@@ -32,7 +32,7 @@ jobs:
 
       - name: Build docs
         run: |
-          julia --project=. docs/src/build.jl
+          julia --project=. docs/app.jl build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
