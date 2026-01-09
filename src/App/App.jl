@@ -375,22 +375,32 @@ function generate_page(
 
     # For therapy-island selectors, the content is already rendered by SSR
     # For legacy #id selectors, inject compiled HTML into placeholder containers
+    # Track which islands are actually used on this page
+    islands_used = Set{String}()
+
     for cc in compiled_components
         selector = cc.component.container_selector
+        component_name = lowercase(cc.component.name)
+
         if startswith(selector, "therapy-island")
-            # Island is already rendered by SSR - no injection needed
-            continue
+            # Check if this island is actually in the rendered content
+            if contains(content, "therapy-island data-component=\"$component_name\"")
+                push!(islands_used, cc.component.name)
+            end
         else
             # Legacy: inject into placeholder div with ID
             id = lstrip(selector, '#')
             pattern = Regex("<div[^>]*id=\"$id\"[^>]*>.*?</div>", "s")
-            replacement = "<div id=\"$id\">$(cc.html)</div>"
-            content = replace(content, pattern => replacement)
+            if contains(content, "id=\"$id\"")
+                replacement = "<div id=\"$id\">$(cc.html)</div>"
+                content = replace(content, pattern => replacement)
+                push!(islands_used, cc.component.name)
+            end
         end
     end
 
-    # Combine all hydration JS
-    all_js = join([cc.js for cc in compiled_components], "\n\n")
+    # Only include hydration JS for islands actually used on this page
+    all_js = join([cc.js for cc in compiled_components if cc.component.name in islands_used], "\n\n")
 
     # Generate page title
     page_title = if route_path == "/"
