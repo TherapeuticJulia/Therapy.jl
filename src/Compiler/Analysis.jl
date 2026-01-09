@@ -16,6 +16,18 @@ struct AnalyzedSignal
 end
 
 """
+Represents extracted IR from an event handler closure.
+Used for direct compilation instead of tracing.
+"""
+struct HandlerIR
+    closure::Function                      # The original closure
+    ir::Core.CodeInfo                      # Typed IR from code_typed
+    return_type::Type                      # Return type from code_typed
+    captured_getters::Dict{Int, UInt64}    # field_idx -> signal_id for getters
+    captured_setters::Dict{Int, UInt64}    # field_idx -> signal_id for setters
+end
+
+"""
 Represents an event handler discovered during component analysis.
 """
 struct AnalyzedHandler
@@ -23,7 +35,8 @@ struct AnalyzedHandler
     event::Symbol           # :on_click, :on_input, etc.
     target_hk::Int          # Hydration key of the element
     handler::Function       # The actual handler function
-    operations::Vector{TracedOperation}  # What operations the handler performs
+    operations::Vector{TracedOperation}  # What operations the handler performs (legacy tracing)
+    handler_ir::Union{HandlerIR, Nothing}  # Extracted IR for direct compilation
 end
 
 """
@@ -66,6 +79,9 @@ struct ComponentAnalysis
     show_nodes::Vector{AnalyzedShow}
     vnode::Any
     html::String
+    # Maps for direct compilation
+    getter_map::Dict{Function, UInt64}   # signal getter -> signal_id
+    setter_map::Dict{Function, UInt64}   # signal setter -> signal_id
 end
 
 """
@@ -124,17 +140,22 @@ function analyze_component(component_fn::Function)
 
     analyze_vnode!(vnode, raw_handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
 
-    # Trace each handler to discover what operations it performs
+    # Process each handler: extract IR for direct compilation AND trace for fallback
     handlers = AnalyzedHandler[]
     for (h_id, h_event, h_hk, h_fn) in raw_handlers
+        # Try to extract handler IR for direct compilation
+        handler_ir = extract_handler_ir(h_fn, getter_map, setter_map)
+
+        # Also trace for backward compatibility (can be removed once direct compilation is stable)
         ops = trace_handler(h_fn, raw_signals)
-        push!(handlers, AnalyzedHandler(h_id, h_event, h_hk, h_fn, ops))
+
+        push!(handlers, AnalyzedHandler(h_id, h_event, h_hk, h_fn, ops, handler_ir))
     end
 
     # Generate HTML with hydration keys
     html = render_to_string(vnode)
 
-    return ComponentAnalysis(signals, handlers, bindings, input_bindings, show_nodes, vnode, html)
+    return ComponentAnalysis(signals, handlers, bindings, input_bindings, show_nodes, vnode, html, getter_map, setter_map)
 end
 
 """
@@ -430,4 +451,317 @@ function disambiguate_operation_3(pairs::Vector{Tuple{Any, Any}})
 
     # Fallback to 2-sample disambiguation
     return disambiguate_operation(old1, new1, old10, new10)
+end
+
+# ============================================================================
+# Direct Compilation: Closure IR Extraction
+# ============================================================================
+
+"""
+    extract_handler_ir(handler::Function, getter_map, setter_map) -> Union{HandlerIR, Nothing}
+
+Extract typed IR from an event handler closure for direct compilation.
+
+Returns HandlerIR with:
+- The closure's typed IR
+- Mappings from captured fields to signal IDs
+
+Returns nothing if IR extraction fails (e.g., not a closure).
+"""
+function extract_handler_ir(handler::Function, getter_map::Dict{Function, UInt64}, setter_map::Dict{Function, UInt64})::Union{HandlerIR, Nothing}
+    try
+        # Get the typed IR for the closure (called with no arguments)
+        typed_results = Base.code_typed(handler, ())
+        if isempty(typed_results)
+            return nothing
+        end
+
+        ir, return_type = typed_results[1]
+
+        # Get the closure type to examine captured fields
+        closure_type = typeof(handler)
+
+        # Map captured signal functions to their field indices
+        captured_getters = Dict{Int, UInt64}()
+        captured_setters = Dict{Int, UInt64}()
+
+        # Iterate through the closure's fields (captured variables)
+        for (field_idx, field_name) in enumerate(fieldnames(closure_type))
+            # Get the captured value
+            captured_value = getfield(handler, field_name)
+
+            # Check if it's a signal getter
+            if haskey(getter_map, captured_value)
+                captured_getters[field_idx] = getter_map[captured_value]
+            end
+
+            # Check if it's a signal setter
+            if haskey(setter_map, captured_value)
+                captured_setters[field_idx] = setter_map[captured_value]
+            end
+        end
+
+        return HandlerIR(handler, ir, return_type, captured_getters, captured_setters)
+    catch e
+        # IR extraction failed - this is OK, we'll fall back to tracing
+        @debug "IR extraction failed for handler" exception=e
+        return nothing
+    end
+end
+
+"""
+    get_signal_bindings_map(bindings::Vector{AnalyzedBinding}) -> Dict{UInt64, Vector{Int}}
+
+Build a map from signal_id to list of hydration keys where that signal is displayed.
+Used for auto-injecting DOM updates after signal changes.
+"""
+function get_signal_bindings_map(bindings::Vector{AnalyzedBinding})::Dict{UInt64, Vector{Int}}
+    result = Dict{UInt64, Vector{Int}}()
+    for b in bindings
+        if !haskey(result, b.signal_id)
+            result[b.signal_id] = Int[]
+        end
+        push!(result[b.signal_id], b.target_hk)
+    end
+    return result
+end
+
+# ============================================================================
+# Semantic Operation Extraction from IR
+# ============================================================================
+
+"""
+Operations that can be expressed semantically for Wasm compilation.
+This extends TracedOperation with IR-based detection.
+"""
+@enum SemanticOpType begin
+    SEM_READ        # Read signal value
+    SEM_WRITE       # Write signal value
+    SEM_ADD         # Addition
+    SEM_SUB         # Subtraction
+    SEM_MUL         # Multiplication
+    SEM_CONST       # Constant value
+    SEM_COMPARE     # Comparison (for conditionals)
+    SEM_BRANCH      # Conditional branch
+end
+
+"""
+Represents a single semantic operation in the handler.
+"""
+struct SemanticOp
+    op_type::SemanticOpType
+    signal_id::Union{UInt64, Nothing}  # For SEM_READ/SEM_WRITE
+    operand::Any                        # Constant value, comparison operator, etc.
+    result_ssa::Union{Int, Nothing}     # SSA that holds result (if any)
+    input_ssa::Vector{Int}              # SSA inputs this op depends on
+end
+
+"""
+    extract_semantic_ops(handler_ir::HandlerIR) -> Vector{SemanticOp}
+
+Extract semantic operations from handler IR by pattern matching.
+
+This analyzes the IR to find:
+1. Signal reads (getter invocations) -> SEM_READ
+2. Arithmetic operations -> SEM_ADD, SEM_SUB, SEM_MUL
+3. Signal writes (setfield! on signal.value) -> SEM_WRITE
+
+Returns a sequence of semantic operations that can be compiled to Wasm.
+"""
+function extract_semantic_ops(handler_ir::HandlerIR)::Vector{SemanticOp}
+    ops = SemanticOp[]
+    ir = handler_ir.ir
+    code = ir.code
+
+    # Track which SSAs are signal getters/setters (from closure getfield)
+    getter_ssas = Dict{Int, UInt64}()  # ssa_id -> signal_id
+    setter_ssas = Dict{Int, UInt64}()  # ssa_id -> signal_id
+
+    # Track which SSAs are Signal objects (from getfield(setter, :signal))
+    signal_obj_ssas = Dict{Int, UInt64}()  # ssa_id -> signal_id
+
+    # First pass: identify signal-related SSAs
+    for (i, stmt) in enumerate(code)
+        if stmt isa Expr && stmt.head === :call
+            func = stmt.args[1]
+            if func isa GlobalRef && func.mod === Core && func.name === :getfield
+                # Core.getfield(target, field)
+                target = stmt.args[2]
+                field_ref = stmt.args[3]
+                field_name = field_ref isa QuoteNode ? field_ref.value : field_ref
+
+                # Check if this is getfield(_1, :signal_field) - getting captured closure field
+                if target isa Core.SlotNumber && target.id == 1 && field_name isa Symbol
+                    # Map field name to field index
+                    closure_type = typeof(handler_ir.closure)
+                    field_names = fieldnames(closure_type)
+                    field_idx = findfirst(==(field_name), field_names)
+
+                    if field_idx !== nothing
+                        if haskey(handler_ir.captured_getters, field_idx)
+                            getter_ssas[i] = handler_ir.captured_getters[field_idx]
+                        end
+                        if haskey(handler_ir.captured_setters, field_idx)
+                            setter_ssas[i] = handler_ir.captured_setters[field_idx]
+                        end
+                    end
+                end
+
+                # Check if this is getfield(setter_ssa, :signal) - getting Signal from setter
+                if target isa Core.SSAValue && field_name === :signal
+                    if haskey(setter_ssas, target.id)
+                        signal_obj_ssas[i] = setter_ssas[target.id]
+                    end
+                end
+            end
+        end
+    end
+
+    # Track which SSAs contain computed values we care about
+    value_ssas = Dict{Int, Tuple{Symbol, Vector{Int}, Any}}()  # ssa -> (op, inputs, extra)
+
+    # Second pass: extract semantic operations
+    for (i, stmt) in enumerate(code)
+        # Handle invoke (function calls)
+        if stmt isa Expr && stmt.head === :invoke
+            # invoke format: (MethodInstance, func_ref, args...)
+            func_ref = stmt.args[2]
+            args = stmt.args[3:end]
+
+            # Check if this is calling a signal getter (no args)
+            if func_ref isa Core.SSAValue && haskey(getter_ssas, func_ref.id) && isempty(args)
+                signal_id = getter_ssas[func_ref.id]
+                push!(ops, SemanticOp(SEM_READ, signal_id, nothing, i, Int[]))
+                value_ssas[i] = (:signal_read, Int[], signal_id)
+            end
+        end
+
+        # Handle arithmetic calls
+        if stmt isa Expr && stmt.head === :call
+            func = stmt.args[1]
+            args = stmt.args[2:end]
+
+            # Base.add_int, Base.sub_int, etc.
+            if func isa GlobalRef && func.mod === Base
+                if func.name === :add_int && length(args) == 2
+                    input_ssas = [a.id for a in args if a isa Core.SSAValue]
+                    const_val = nothing
+                    for a in args
+                        if a isa Integer
+                            const_val = a
+                        end
+                    end
+                    if const_val !== nothing
+                        push!(ops, SemanticOp(SEM_ADD, nothing, const_val, i, input_ssas))
+                    end
+                    value_ssas[i] = (:add, input_ssas, const_val)
+
+                elseif func.name === :sub_int && length(args) == 2
+                    input_ssas = [a.id for a in args if a isa Core.SSAValue]
+                    const_val = nothing
+                    for a in args
+                        if a isa Integer
+                            const_val = a
+                        end
+                    end
+                    if const_val !== nothing
+                        push!(ops, SemanticOp(SEM_SUB, nothing, const_val, i, input_ssas))
+                    end
+                    value_ssas[i] = (:sub, input_ssas, const_val)
+
+                elseif func.name === :mul_int && length(args) == 2
+                    input_ssas = [a.id for a in args if a isa Core.SSAValue]
+                    const_val = nothing
+                    for a in args
+                        if a isa Integer
+                            const_val = a
+                        end
+                    end
+                    if const_val !== nothing
+                        push!(ops, SemanticOp(SEM_MUL, nothing, const_val, i, input_ssas))
+                    end
+                    value_ssas[i] = (:mul, input_ssas, const_val)
+                end
+
+                # setfield!(signal_obj, :value, new_value) - signal write
+                if func.name === :setfield! && length(args) >= 3
+                    target = args[1]
+                    field_ref = args[2]
+                    new_value = args[3]
+
+                    field_name = field_ref isa QuoteNode ? field_ref.value : field_ref
+
+                    if target isa Core.SSAValue && field_name === :value
+                        if haskey(signal_obj_ssas, target.id)
+                            signal_id = signal_obj_ssas[target.id]
+                            input_ssas = new_value isa Core.SSAValue ? [new_value.id] : Int[]
+                            push!(ops, SemanticOp(SEM_WRITE, signal_id, nothing, nothing, input_ssas))
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return ops
+end
+
+"""
+    semantic_ops_to_traced(ops::Vector{SemanticOp}) -> Vector{TracedOperation}
+
+Convert semantic operations to traced operations for compatibility with WasmGen.
+This allows using the semantic extraction with the existing bytecode generation.
+"""
+function semantic_ops_to_traced(ops::Vector{SemanticOp})::Vector{TracedOperation}
+    result = TracedOperation[]
+
+    # Track signal reads for computing deltas
+    signal_reads = Dict{UInt64, Int}()  # signal_id -> ssa that holds the read value
+
+    for op in ops
+        if op.op_type == SEM_READ && op.signal_id !== nothing
+            signal_reads[op.signal_id] = op.result_ssa !== nothing ? op.result_ssa : 0
+        end
+
+        if op.op_type == SEM_WRITE && op.signal_id !== nothing
+            # Find the computation that produces the write value
+            # Look at the semantic ops to determine the operation
+
+            # Simple case: check if there's an ADD or SUB that writes to this signal
+            for prior_op in ops
+                if prior_op.op_type == SEM_ADD && !isempty(prior_op.input_ssa)
+                    # Check if input is from a signal read
+                    for input_ssa in prior_op.input_ssa
+                        if haskey(signal_reads, op.signal_id) && signal_reads[op.signal_id] == input_ssa
+                            if prior_op.operand == 1
+                                push!(result, TracedOperation(op.signal_id, OP_INCREMENT, nothing))
+                            else
+                                push!(result, TracedOperation(op.signal_id, OP_ADD, prior_op.operand))
+                            end
+                            @goto found_op
+                        end
+                    end
+                end
+
+                if prior_op.op_type == SEM_SUB && !isempty(prior_op.input_ssa)
+                    for input_ssa in prior_op.input_ssa
+                        if haskey(signal_reads, op.signal_id) && signal_reads[op.signal_id] == input_ssa
+                            if prior_op.operand == 1
+                                push!(result, TracedOperation(op.signal_id, OP_DECREMENT, nothing))
+                            else
+                                push!(result, TracedOperation(op.signal_id, OP_SUB, prior_op.operand))
+                            end
+                            @goto found_op
+                        end
+                    end
+                end
+            end
+
+            # Fallback: unknown operation
+            push!(result, TracedOperation(op.signal_id, OP_UNKNOWN, nothing))
+            @label found_op
+        end
+    end
+
+    return result
 end

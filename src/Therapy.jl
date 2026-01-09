@@ -32,8 +32,12 @@ include("Server/DevServer.jl")
 # Compiler
 include("Compiler/Compile.jl")
 
+# Static Site Generator
+include("SSG/StaticSite.jl")
+
 # Exports - Reactivity
 export create_signal, create_effect, create_memo, batch, dispose!
+export create_compilable_signal, CompilableSignal, CompilableSetter
 
 # Exports - DOM Elements (Capitalized like JSX)
 export VNode, Fragment, Show, RawHtml
@@ -68,5 +72,8 @@ export serve, serve_static
 
 # Exports - Compiler
 export compile_component, compile_and_serve, compile_multi
+
+# Exports - Static Site Generator
+export SiteConfig, PageRoute, BuildResult, build_static_site
 
 end # module

@@ -266,3 +266,86 @@ function batch(fn::Function)
         end_batch!()
     end
 end
+
+# ============================================================================
+# Compilable Signal Accessors
+# ============================================================================
+# These are simple read/write functions that compile to clean IR.
+# Used by the Wasm compiler to generate efficient code without
+# runtime overhead (no tracing, no notifications - those happen
+# in the Wasm DOM update injection phase).
+
+"""
+    _signal_read(signal::Signal{T}) -> T
+
+Simple signal read that compiles to clean IR.
+Just returns the signal's value without any runtime tracking.
+"""
+@inline function _signal_read(signal::Signal{T})::T where T
+    return signal.value
+end
+
+"""
+    _signal_write(signal::Signal{T}, value::T) -> T
+
+Simple signal write that compiles to clean IR.
+Just sets the signal's value without any runtime tracking or notification.
+Returns the written value.
+"""
+@inline function _signal_write(signal::Signal{T}, value::T)::T where T
+    signal.value = value
+    return value
+end
+
+"""
+A compilable wrapper that holds a reference to the underlying Signal.
+Used to create handlers that compile to efficient Wasm code.
+"""
+struct CompilableSignal{T}
+    signal::Signal{T}
+end
+
+# Make CompilableSignal callable like a getter
+@inline function (cs::CompilableSignal{T})()::T where T
+    return _signal_read(cs.signal)
+end
+
+"""
+A compilable setter wrapper.
+"""
+struct CompilableSetter{T}
+    signal::Signal{T}
+end
+
+# Make CompilableSetter callable like a setter
+@inline function (cs::CompilableSetter{T})(value::T)::T where T
+    return _signal_write(cs.signal, value)
+end
+
+"""
+    create_compilable_signal(initial::T) -> (CompilableSignal{T}, CompilableSetter{T}, Signal{T})
+
+Create a signal with compilable accessors for Wasm compilation.
+
+Returns:
+- getter: CompilableSignal that can be called to read the value
+- setter: CompilableSetter that can be called to write the value
+- signal: The underlying Signal object (for analysis)
+
+The getter and setter are designed to compile to clean IR without
+runtime overhead (tracing, notifications, etc.).
+
+# Example
+```julia
+count, set_count, signal = create_compilable_signal(0)
+count()         # => 0
+set_count(5)    # => 5
+count()         # => 5
+```
+"""
+function create_compilable_signal(initial::T) where T
+    signal = Signal{T}(next_signal_id(), initial, Set{Any}())
+    getter = CompilableSignal{T}(signal)
+    setter = CompilableSetter{T}(signal)
+    return (getter, setter, signal)
+end
