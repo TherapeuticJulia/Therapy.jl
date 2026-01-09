@@ -36,60 +36,47 @@ function generate_wasm(analysis::ComponentAnalysis)
 
     # =========================================================================
     # IMPORTS - DOM manipulation functions provided by JS runtime
+    # All numeric values are passed as f64 for simplicity (JS numbers are f64)
     # =========================================================================
 
-    # Import index 0: update_text(hk: i32, value: i32) - update text content of element
-    add_import!(mod, "dom", "update_text_i32",
-                [I32, I32], WasmTarget.NumType[])
-
-    # Import index 1: update_text_f64(hk: i32, value: f64) - update with float
-    add_import!(mod, "dom", "update_text_f64",
+    # Import index 0: update_text(hk: i32, value: f64) - update text content
+    add_import!(mod, "dom", "update_text",
                 [I32, F64], WasmTarget.NumType[])
 
-    # Import index 2: update_attr(hk: i32, attr: i32, value: i32) - update attribute
-    add_import!(mod, "dom", "update_attr",
-                [I32, I32, I32], WasmTarget.NumType[])
-
-    # Import index 3: set_visible(hk: i32, visible: i32) - show/hide element (0=hidden, 1=visible)
+    # Import index 1: set_visible(hk: i32, visible: f64) - show/hide element (0=hidden, 1=visible)
     add_import!(mod, "dom", "set_visible",
-                [I32, I32], WasmTarget.NumType[])
+                [I32, F64], WasmTarget.NumType[])
 
-    # Import index 4: set_dark_mode(enabled: i32) - toggle dark mode on document root (0=light, 1=dark)
+    # Import index 2: set_dark_mode(enabled: f64) - toggle dark mode (0=light, 1=dark)
     add_import!(mod, "dom", "set_dark_mode",
-                [I32], WasmTarget.NumType[])
+                [F64], WasmTarget.NumType[])
 
     # =========================================================================
     # GLOBALS - One for each signal
+    # Type conversion to f64 for DOM calls is handled automatically by WasmTarget
     # =========================================================================
 
     for signal in analysis.signals
         initial = signal.initial_value
 
         # Determine Wasm type and create global
-        # Match the actual Julia type to avoid type mismatches in handlers
-        if signal.type == Int32 || signal.type == UInt32
-            global_idx = add_global!(mod, I32, true, Int32(initial))
-            signal_globals[signal.id] = global_idx
+        # Match the actual Julia type for correct handler compilation
+        global_idx = if signal.type == Int32 || signal.type == UInt32
+            add_global!(mod, I32, true, Int32(initial))
         elseif signal.type == Int64 || signal.type == UInt64 || signal.type == Int
-            global_idx = add_global!(mod, I64, true, Int64(initial))
-            signal_globals[signal.id] = global_idx
+            add_global!(mod, I64, true, Int64(initial))
         elseif signal.type == Float32
-            global_idx = add_global!(mod, F32, true, Float32(initial))
-            signal_globals[signal.id] = global_idx
+            add_global!(mod, F32, true, Float32(initial))
         elseif signal.type == Float64
-            global_idx = add_global!(mod, F64, true, Float64(initial))
-            signal_globals[signal.id] = global_idx
+            add_global!(mod, F64, true, Float64(initial))
+        elseif signal.type == Bool
+            add_global!(mod, I32, true, Int32(initial ? 1 : 0))
         else
-            # Default to i64 for other integer types, i32 for bool
-            if signal.type == Bool
-                global_idx = add_global!(mod, I32, true, Int32(initial ? 1 : 0))
-            else
-                global_idx = add_global!(mod, I64, true, Int64(0))
-            end
-            signal_globals[signal.id] = global_idx
+            # Default to i64 for other types
+            add_global!(mod, I64, true, Int64(0))
         end
 
-        # Export the global
+        signal_globals[signal.id] = global_idx
         add_global_export!(mod, "signal_$(signal.id)", global_idx)
     end
 
@@ -178,28 +165,50 @@ function generate_wasm(analysis::ComponentAnalysis)
 
         handler_code = UInt8[]
 
+        # Get signal type for conversion
+        signal = findfirst(s -> s.id == input_binding.signal_id, analysis.signals)
+        signal_type = signal !== nothing ? analysis.signals[signal].type : Int64
+
         # Set the signal from the parameter: signal = param
-        append!(handler_code, [
-            Opcode.LOCAL_GET, 0x00,  # Get the input value parameter
-            Opcode.GLOBAL_SET, UInt8(global_idx),
-        ])
+        # Input comes as f64 from JS, convert to signal's native type
+        append!(handler_code, [Opcode.LOCAL_GET, 0x00])  # Get the input value parameter (f64)
+        # Convert f64 to signal type
+        if signal_type == Int64 || signal_type == UInt64 || signal_type == Int
+            push!(handler_code, 0xB0)  # i64.trunc_f64_s
+        elseif signal_type == Int32 || signal_type == UInt32
+            push!(handler_code, 0xAA)  # i32.trunc_f64_s
+        elseif signal_type == Float32
+            push!(handler_code, 0xB6)  # f32.demote_f64
+        end
+        # If Float64, no conversion needed
+        append!(handler_code, [Opcode.GLOBAL_SET, UInt8(global_idx)])
 
         # Update DOM for all bindings (except the input itself which already has the value)
         for binding in bindings_for_signal
             if binding.target_hk != input_binding.target_hk  # Don't update the input itself
+                # Push hydration key (i32)
                 append!(handler_code, [Opcode.I32_CONST])
                 append!(handler_code, encode_leb128_unsigned(binding.target_hk))
-                append!(handler_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.CALL, 0x00,  # call update_text_i32
-                ])
+                # Push signal value
+                append!(handler_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
+                # Convert to f64 based on signal type
+                if signal_type == Int64 || signal_type == UInt64 || signal_type == Int
+                    push!(handler_code, 0xB9)  # f64.convert_i64_s
+                elseif signal_type == Int32 || signal_type == UInt32
+                    push!(handler_code, 0xB7)  # f64.convert_i32_s
+                elseif signal_type == Float32
+                    push!(handler_code, 0xBB)  # f64.promote_f32
+                end
+                # If Float64, no conversion needed
+                append!(handler_code, [Opcode.CALL, 0x00])  # call update_text
             end
         end
 
         append!(handler_code, [Opcode.END])
 
-        # Input handlers take one i32 parameter (the new value)
-        handler_idx = add_function!(mod, [I32], no_results, no_locals, handler_code)
+        # Input handlers take one f64 parameter (the new value from JS)
+        # JS passes numbers as f64, so we need to convert for the signal
+        handler_idx = add_function!(mod, [F64], no_results, no_locals, handler_code)
         add_export!(mod, "input_handler_$(input_binding.handler_id)", 0x00, handler_idx)
         push!(exports, "input_handler_$(input_binding.handler_id)")
     end
@@ -210,19 +219,26 @@ function generate_wasm(analysis::ComponentAnalysis)
 
     init_code = UInt8[]
     for signal in analysis.signals
-        if signal.type <: Integer
+        if signal.type <: Number
             global_idx = signal_globals[signal.id]
             bindings_for_signal = filter(b -> b.signal_id == signal.id, analysis.bindings)
 
             for binding in bindings_for_signal
-                append!(init_code, [
-                    Opcode.I32_CONST
-                ])
+                # Push hydration key (i32)
+                append!(init_code, [Opcode.I32_CONST])
                 append!(init_code, encode_leb128_unsigned(binding.target_hk))
-                append!(init_code, [
-                    Opcode.GLOBAL_GET, UInt8(global_idx),
-                    Opcode.CALL, 0x00,  # call update_text_i32
-                ])
+                # Push signal value and convert to f64
+                append!(init_code, [Opcode.GLOBAL_GET, UInt8(global_idx)])
+                # Add f64 conversion based on signal type
+                if signal.type == Int64 || signal.type == UInt64 || signal.type == Int
+                    push!(init_code, 0xB9)  # f64.convert_i64_s
+                elseif signal.type == Int32 || signal.type == UInt32
+                    push!(init_code, 0xB7)  # f64.convert_i32_s
+                elseif signal.type == Float32
+                    push!(init_code, 0xBB)  # f64.promote_f32
+                end
+                # If Float64, no conversion needed
+                append!(init_code, [Opcode.CALL, 0x00])  # call update_text
             end
         end
     end
@@ -286,12 +302,12 @@ Build DOM bindings map for all signals.
 Returns a Dict mapping global_idx -> [(import_idx, const_args), ...]
 This tells the compiler what DOM updates to inject after signal writes.
 
+All numeric values are automatically converted to f64 by WasmTarget.
+
 Import indices:
-- 0: update_text_i32(hk, value)
-- 1: update_text_f64(hk, value)
-- 2: update_attr(hk, attr, value)
-- 3: set_visible(hk, visible)
-- 4: set_dark_mode(enabled)
+- 0: update_text(hk, value: f64) - update text content
+- 1: set_visible(hk, visible: f64) - show/hide element
+- 2: set_dark_mode(enabled: f64) - toggle dark mode
 """
 function build_dom_bindings(analysis::ComponentAnalysis, signal_globals::Dict{UInt64, Int})
     dom_bindings = Dict{UInt32, Vector{Tuple{UInt32, Vector{Int32}}}}()
@@ -299,19 +315,19 @@ function build_dom_bindings(analysis::ComponentAnalysis, signal_globals::Dict{UI
     for (signal_id, global_idx) in signal_globals
         bindings_list = Tuple{UInt32, Vector{Int32}}[]
 
-        # Text bindings: update_text_i32(hk, value) - import idx 0
+        # Text bindings: update_text(hk, value) - import idx 0
         for binding in filter(b -> b.signal_id == signal_id && b.attribute === nothing, analysis.bindings)
             push!(bindings_list, (UInt32(0), Int32[binding.target_hk]))
         end
 
-        # Show bindings: set_visible(hk, value) - import idx 3
+        # Show bindings: set_visible(hk, visible) - import idx 1
         for show in filter(s -> s.signal_id == signal_id, analysis.show_nodes)
-            push!(bindings_list, (UInt32(3), Int32[show.target_hk]))
+            push!(bindings_list, (UInt32(1), Int32[show.target_hk]))
         end
 
-        # Theme bindings: set_dark_mode(value) - import idx 4
+        # Theme bindings: set_dark_mode(enabled) - import idx 2
         for _theme in filter(t -> t.signal_id == signal_id, analysis.theme_bindings)
-            push!(bindings_list, (UInt32(4), Int32[]))
+            push!(bindings_list, (UInt32(2), Int32[]))
         end
 
         if !isempty(bindings_list)

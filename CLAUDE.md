@@ -227,9 +227,11 @@ cd examples/todo && julia --project=../.. app.jl
 - [x] Show conditional rendering
 - [x] File-path routing
 - [x] Tailwind CSS integration
-- [x] Event handler compilation to Wasm
+- [x] Direct IR compilation to Wasm (via WasmTarget.jl)
+- [x] Event handler compilation to Wasm (arbitrary Julia code)
 - [x] Two-way input binding
-- [x] Handler operation tracing (increment, decrement, toggle, etc.)
+- [x] Theme binding (dark mode toggle)
+- [x] Regular Julia `Int` works (no Int32 annotations needed)
 
 ### In Progress / Planned
 - [ ] Resources (async data fetching)
@@ -246,13 +248,20 @@ Unlike React's VDOM diffing, Therapy.jl tracks signal dependencies precisely. Wh
 ### VNode is Compile-Time Only
 VNodes are used for SSR and analysis, not runtime diffing. At runtime, Wasm directly updates DOM nodes by hydration key.
 
-### Handler Tracing
-Event handlers are traced with multiple test values to detect operations:
-- `set_count(count() + 1)` → OP_INCREMENT
-- `set_count(count() - 1)` → OP_DECREMENT
-- `set_visible(visible() == 0 ? 1 : 0)` → OP_TOGGLE
+### Direct IR Compilation
+Event handlers are compiled directly from Julia IR to WebAssembly:
+1. `compile_component()` analyzes the component to find signals and handlers
+2. Handler closures are inspected via `Base.code_typed()` to get their IR
+3. Signal getters/setters in closures are substituted with Wasm global.get/set
+4. DOM update calls are automatically injected after signal writes
+5. Type conversions (e.g., Int64 to f64) are handled automatically
 
-This enables generating efficient Wasm without parsing Julia code.
+This enables compiling arbitrary Julia code to Wasm, not just simple patterns.
+
+### f64 DOM Values
+All numeric values passed to DOM imports use f64 (JavaScript's number type).
+Type conversion is handled automatically by WasmTarget.jl, so users can write
+regular Julia code with `Int`, `Int32`, `Float64`, etc. - all work seamlessly.
 
 ## Dependencies
 

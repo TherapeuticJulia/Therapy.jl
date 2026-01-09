@@ -145,8 +145,9 @@ cd examples/todo && julia --project=../.. app.jl
 | File-path routing | ✅ |
 | Tailwind CSS | ✅ |
 | Show conditional | ✅ |
-| Event → Wasm compilation | ✅ |
+| Direct IR → Wasm compilation | ✅ |
 | Two-way input binding | ✅ |
+| Theme binding (dark mode) | ✅ |
 | Resources (async) | 🚧 |
 | Context API | 🚧 |
 | Server functions | 🚧 |
