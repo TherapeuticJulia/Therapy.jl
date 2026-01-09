@@ -22,6 +22,7 @@ const ROUTES = [
 # Interactive components - these are compiled to WebAssembly
 # See the source files for the actual Julia code that becomes Wasm
 include("components/InteractiveCounter.jl")
+include("components/ThemeToggle.jl")
 
 """
 Build the interactive counter using Therapy.jl's compile_component.
@@ -41,9 +42,25 @@ function build_interactive_counter()
 end
 
 """
-Generate a full HTML page with Tailwind CSS.
+Build the theme toggle using Therapy.jl's compile_component.
+Returns the HTML, Wasm bytes, and hydration JS.
 """
-function generate_page(component_fn; title="Therapy.jl Docs", counter_html="", counter_js="")
+function build_theme_toggle()
+    println("  Compiling ThemeToggle with Therapy.jl...")
+
+    # Use container_selector to scope DOM queries to #theme-toggle
+    compiled = compile_component(ThemeToggle; container_selector="#theme-toggle")
+
+    println("    Wasm: $(length(compiled.wasm.bytes)) bytes")
+    println("    Exports: $(join(compiled.wasm.exports, ", "))")
+
+    return compiled
+end
+
+"""
+Generate a full HTML page with Tailwind CSS and dark mode support.
+"""
+function generate_page(component_fn; title="Therapy.jl Docs", counter_html="", counter_js="", theme_html="", theme_js="")
     # Get the rendered component HTML (use invokelatest for dynamic includes)
     content = render_to_string(Base.invokelatest(component_fn))
 
@@ -53,6 +70,23 @@ function generate_page(component_fn; title="Therapy.jl Docs", counter_html="", c
             r"<div[^>]*id=\"counter-demo\"[^>]*>.*?</div>"s =>
             """<div id="counter-demo" class="bg-white/10 backdrop-blur rounded-xl p-8 max-w-md mx-auto">$counter_html</div>""")
     end
+
+    # If we have theme toggle HTML, inject it into the theme-toggle div
+    if !isempty(theme_html)
+        content = replace(content,
+            r"<div[^>]*id=\"theme-toggle\"[^>]*></div>"s =>
+            """<div id="theme-toggle" class="ml-2">$theme_html</div>""")
+    end
+
+    # Combine all JS
+    all_js = String[]
+    if !isempty(counter_js)
+        push!(all_js, counter_js)
+    end
+    if !isempty(theme_js)
+        push!(all_js, theme_js)
+    end
+    combined_js = join(all_js, "\n\n")
 
     # Wrap in full HTML document
     """
@@ -66,9 +100,10 @@ function generate_page(component_fn; title="Therapy.jl Docs", counter_html="", c
     <!-- Tailwind CSS from CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Custom Tailwind config -->
+    <!-- Custom Tailwind config with dark mode -->
     <script>
         tailwind.config = {
+            darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
@@ -91,6 +126,18 @@ function generate_page(component_fn; title="Therapy.jl Docs", counter_html="", c
         html { scroll-behavior: smooth; }
         pre code { font-family: 'Fira Code', 'Monaco', 'Consolas', monospace; }
     </style>
+
+    <!-- Initialize theme from localStorage before page renders -->
+    <script>
+        (function() {
+            try {
+                const saved = localStorage.getItem('therapy-theme');
+                if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                    document.documentElement.classList.add('dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
 </head>
 <body class="antialiased">
     $(content)
@@ -99,7 +146,7 @@ function generate_page(component_fn; title="Therapy.jl Docs", counter_html="", c
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-julia.min.js"></script>
 
-    $(isempty(counter_js) ? "" : "<script>\n$counter_js\n</script>")
+    $(isempty(combined_js) ? "" : "<script>\n$combined_js\n</script>")
 </body>
 </html>
 """
@@ -117,14 +164,22 @@ function build()
     mkpath(DIST_DIR)
     mkpath(joinpath(DIST_DIR, "wasm"))
 
-    # Build the interactive counter component using Therapy.jl compilation
+    # Build the interactive components using Therapy.jl compilation
     println("\n━━━ Compiling Interactive Components ━━━")
     compiled_counter = build_interactive_counter()
+    compiled_theme = build_theme_toggle()
 
-    # Write the Wasm file
-    wasm_path = joinpath(DIST_DIR, "app.wasm")
-    write(wasm_path, compiled_counter.wasm.bytes)
-    println("  Wrote: $wasm_path")
+    # Write the Wasm files
+    counter_wasm_path = joinpath(DIST_DIR, "app.wasm")
+    write(counter_wasm_path, compiled_counter.wasm.bytes)
+    println("  Wrote: $counter_wasm_path")
+
+    theme_wasm_path = joinpath(DIST_DIR, "theme.wasm")
+    write(theme_wasm_path, compiled_theme.wasm.bytes)
+    println("  Wrote: $theme_wasm_path")
+
+    # Generate theme toggle hydration with correct wasm path
+    theme_js = replace(compiled_theme.hydration.js, "./app.wasm" => "./theme.wasm")
 
     # Generate each route
     println("\n━━━ Building Pages ━━━")
@@ -142,14 +197,20 @@ function build()
             "Therapy.jl - $(titlecase(basename(strip(route_path, '/'))))"
         end
 
-        # For the home page, include the compiled counter
+        # For the home page, include both compiled components
         if route_path == "/"
             html = Base.invokelatest(generate_page, component_fn,
                 title=route_title,
                 counter_html=compiled_counter.html,
-                counter_js=compiled_counter.hydration.js)
+                counter_js=compiled_counter.hydration.js,
+                theme_html=compiled_theme.html,
+                theme_js=theme_js)
         else
-            html = Base.invokelatest(generate_page, component_fn, title=route_title)
+            # Other pages only get the theme toggle
+            html = Base.invokelatest(generate_page, component_fn,
+                title=route_title,
+                theme_html=compiled_theme.html,
+                theme_js=theme_js)
         end
 
         # Determine output path
@@ -174,13 +235,21 @@ function build()
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Page Not Found - Therapy.jl</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class' }
+        try {
+            if (localStorage.getItem('therapy-theme') === 'dark') {
+                document.documentElement.classList.add('dark');
+            }
+        } catch (e) {}
+    </script>
 </head>
-<body class="antialiased bg-gray-50">
+<body class="antialiased bg-slate-50 dark:bg-slate-900">
     <div class="min-h-screen flex items-center justify-center">
         <div class="text-center">
-            <h1 class="text-6xl font-bold text-gray-300">404</h1>
-            <p class="text-xl text-gray-600 mt-4">Page not found</p>
-            <a href="/" class="inline-block mt-6 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">
+            <h1 class="text-6xl font-bold text-slate-300 dark:text-slate-600">404</h1>
+            <p class="text-xl text-slate-600 dark:text-slate-400 mt-4">Page not found</p>
+            <a href="/" class="inline-block mt-6 px-6 py-3 bg-violet-600 text-white rounded-lg hover:bg-violet-500 transition">
                 Go Home
             </a>
         </div>

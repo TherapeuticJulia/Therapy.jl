@@ -69,6 +69,14 @@ struct AnalyzedShow
 end
 
 """
+Represents a theme binding where a signal controls dark/light mode.
+When the signal is 1, dark mode is enabled; when 0, light mode.
+"""
+struct AnalyzedThemeBinding
+    signal_id::UInt64       # The signal that controls the theme
+end
+
+"""
 Result of analyzing a component.
 """
 struct ComponentAnalysis
@@ -77,6 +85,7 @@ struct ComponentAnalysis
     bindings::Vector{AnalyzedBinding}
     input_bindings::Vector{AnalyzedInputBinding}
     show_nodes::Vector{AnalyzedShow}
+    theme_bindings::Vector{AnalyzedThemeBinding}  # Theme (dark mode) bindings
     vnode::Any
     html::String
     # Maps for direct compilation
@@ -135,10 +144,11 @@ function analyze_component(component_fn::Function)
     bindings = AnalyzedBinding[]
     input_bindings = AnalyzedInputBinding[]
     show_nodes = AnalyzedShow[]
+    theme_bindings = AnalyzedThemeBinding[]
     hk_counter = Ref(0)
     handler_counter = Ref(0)
 
-    analyze_vnode!(vnode, raw_handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+    analyze_vnode!(vnode, raw_handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
 
     # Process each handler: extract IR for direct compilation AND trace for fallback
     handlers = AnalyzedHandler[]
@@ -155,13 +165,13 @@ function analyze_component(component_fn::Function)
     # Generate HTML with hydration keys
     html = render_to_string(vnode)
 
-    return ComponentAnalysis(signals, handlers, bindings, input_bindings, show_nodes, vnode, html, getter_map, setter_map)
+    return ComponentAnalysis(signals, handlers, bindings, input_bindings, show_nodes, theme_bindings, vnode, html, getter_map, setter_map)
 end
 
 """
 Recursively analyze a VNode tree.
 """
-function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
     hk_counter[] += 1
     hk = hk_counter[]
 
@@ -200,6 +210,15 @@ function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_no
                     push!(handlers, (handler_counter[], key, hk, value))
                 end
             end
+        elseif key == :dark_mode && value isa Function
+            # Theme binding - signal controls dark/light mode
+            signal_id = get(getter_map, value, nothing)
+            if signal_id !== nothing
+                # Only add if not already present
+                if !any(tb -> tb.signal_id == signal_id, theme_bindings)
+                    push!(theme_bindings, AnalyzedThemeBinding(signal_id))
+                end
+            end
         elseif value isa Function
             # Check if it's a signal getter (use local getter_map, not global)
             signal_id = get(getter_map, value, nothing)
@@ -208,7 +227,7 @@ function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_no
                 # Track value binding for input elements
                 if is_input && key == :value
                     value_signal_id = signal_id
-                end
+            end
             end
         end
     end
@@ -216,11 +235,11 @@ function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_no
     # Check children for signal bindings and nested nodes
     for child in node.children
         if child isa VNode
-            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         elseif child isa ShowNode
-            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         elseif child isa Fragment
-            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         elseif child isa Function
             # Check if it's a signal getter (use local getter_map, not global)
             signal_id = get(getter_map, child, nothing)
@@ -231,13 +250,13 @@ function analyze_vnode!(node::VNode, handlers, bindings, input_bindings, show_no
         elseif child isa ComponentInstance
             rendered = render_component(child)
             if rendered isa VNode
-                analyze_vnode!(rendered, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+                analyze_vnode!(rendered, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
             end
         end
     end
 end
 
-function analyze_vnode!(node::ShowNode, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+function analyze_vnode!(node::ShowNode, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
     # Show wrapper gets its own hydration key
     hk_counter[] += 1
     hk = hk_counter[]
@@ -251,24 +270,24 @@ function analyze_vnode!(node::ShowNode, handlers, bindings, input_bindings, show
     # Analyze the content inside the Show
     if node.content !== nothing
         if node.content isa VNode
-            analyze_vnode!(node.content, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+            analyze_vnode!(node.content, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         elseif node.content isa Fragment
-            analyze_vnode!(node.content, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+            analyze_vnode!(node.content, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         end
     end
 end
 
-function analyze_vnode!(node::Fragment, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+function analyze_vnode!(node::Fragment, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
     for child in node.children
         if child isa VNode
-            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         elseif child isa ShowNode
-            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+            analyze_vnode!(child, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
         end
     end
 end
 
-function analyze_vnode!(node, handlers, bindings, input_bindings, show_nodes, getter_map, setter_map, hk_counter, handler_counter)
+function analyze_vnode!(node, handlers, bindings, input_bindings, show_nodes, theme_bindings, getter_map, setter_map, hk_counter, handler_counter)
     # Primitive values, strings, etc. - nothing to analyze
 end
 

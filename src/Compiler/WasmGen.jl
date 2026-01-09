@@ -36,21 +36,25 @@ function generate_wasm(analysis::ComponentAnalysis)
     # IMPORTS - DOM manipulation functions provided by JS runtime
     # =========================================================================
 
-    # update_text(hk: i32, value: i32) - update text content of element
+    # Import index 0: update_text(hk: i32, value: i32) - update text content of element
     add_import!(mod, "dom", "update_text_i32",
                 [I32, I32], WasmTarget.NumType[])
 
-    # update_text_f64(hk: i32, value: f64) - update with float
+    # Import index 1: update_text_f64(hk: i32, value: f64) - update with float
     add_import!(mod, "dom", "update_text_f64",
                 [I32, F64], WasmTarget.NumType[])
 
-    # update_attr(hk: i32, attr: i32, value: i32) - update attribute
+    # Import index 2: update_attr(hk: i32, attr: i32, value: i32) - update attribute
     add_import!(mod, "dom", "update_attr",
                 [I32, I32, I32], WasmTarget.NumType[])
 
-    # set_visible(hk: i32, visible: i32) - show/hide element (0=hidden, 1=visible)
+    # Import index 3: set_visible(hk: i32, visible: i32) - show/hide element (0=hidden, 1=visible)
     add_import!(mod, "dom", "set_visible",
                 [I32, I32], WasmTarget.NumType[])
+
+    # Import index 4: set_dark_mode(enabled: i32) - toggle dark mode on document root (0=light, 1=dark)
+    add_import!(mod, "dom", "set_dark_mode",
+                [I32], WasmTarget.NumType[])
 
     # =========================================================================
     # GLOBALS - One for each signal
@@ -213,6 +217,19 @@ function generate_wasm(analysis::ComponentAnalysis)
                     Opcode.I32_CONST, 0x00,
                     Opcode.I32_NE,  # Compare not equal to 0 -> 1 if truthy, 0 if falsy
                     Opcode.CALL, 0x03,  # call set_visible (import idx 3)
+                ])
+            end
+
+            # Update theme (dark mode) for signals that control theme
+            theme_for_signal = filter(t -> t.signal_id == signal_id, analysis.theme_bindings)
+            for _theme in theme_for_signal
+                # set_dark_mode(signal != 0)
+                # Convert signal value to bool: (signal != 0) ? 1 : 0
+                append!(handler_code, [
+                    Opcode.GLOBAL_GET, UInt8(global_idx),
+                    Opcode.I32_CONST, 0x00,
+                    Opcode.I32_NE,  # Compare not equal to 0 -> 1 if truthy, 0 if falsy
+                    Opcode.CALL, 0x04,  # call set_dark_mode (import idx 4)
                 ])
             end
         end

@@ -19,6 +19,7 @@ The generated code:
 - Loads the Wasm module
 - Connects event handlers to DOM elements
 - Sets up DOM update callbacks for Wasm
+- Initializes theme signals from current DOM state
 
 If `container_selector` is provided, all DOM queries are scoped within that container.
 This is important when embedding compiled components in pages with other data-hk attributes.
@@ -127,6 +128,14 @@ $(container_init)
                     el.style.display = visible ? '' : 'none';
                     console.log('%c[Wasm→DOM] set_visible(hk=' + hk + ', visible=' + !!visible + ')', 'color: #be4bdb');
                 }
+            },
+            set_dark_mode: (enabled) => {
+                const isDark = !!enabled;
+                document.documentElement.classList.toggle('dark', isDark);
+                try {
+                    localStorage.setItem('therapy-theme', isDark ? 'dark' : 'light');
+                } catch (e) {}
+                console.log('%c[Wasm→DOM] set_dark_mode(enabled=' + isDark + ')', 'color: #9775fa');
             }
         }
     };
@@ -143,6 +152,10 @@ $(container_init)
     // Connect input bindings
     $(join(input_connections, "\n    "))
 
+    // Initialize theme signals from current DOM state
+    // This ensures the Wasm signal matches the saved theme preference
+    $(generate_theme_init(analysis))
+
     // Initialize (sync DOM with Wasm state)
     if (wasm.init) {
         wasm.init();
@@ -158,4 +171,28 @@ $(container_init)
 """
 
     return HydrationOutput(js, event_bindings)
+end
+
+"""
+Generate JavaScript code to initialize theme signals from DOM state.
+This ensures the Wasm signal matches the current theme (from localStorage or system preference).
+"""
+function generate_theme_init(analysis::ComponentAnalysis)
+    if isempty(analysis.theme_bindings)
+        return ""
+    end
+
+    # Generate initialization code for each theme binding
+    inits = String[]
+    for theme_binding in analysis.theme_bindings
+        signal_id = theme_binding.signal_id
+        push!(inits, """
+    // Sync theme signal with DOM state
+    if (document.documentElement.classList.contains('dark') && wasm.set_signal_$(signal_id)) {
+        wasm.set_signal_$(signal_id)(1);
+        console.log('%c[Hydration] Theme signal synced: dark mode active', 'color: #9775fa');
+    }""")
+    end
+
+    return join(inits, "\n")
 end
