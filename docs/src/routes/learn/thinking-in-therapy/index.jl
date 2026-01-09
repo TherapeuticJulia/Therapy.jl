@@ -447,12 +447,6 @@ end
     )
 end
 
-function CodeBlock(code)
-    Pre(:class => "bg-stone-800 dark:bg-stone-950 rounded-lg p-4 overflow-x-auto my-4",
-        Code(:class => "text-sm text-stone-100 whitespace-pre", code)
-    )
-end
-
 function SummaryPoint(number, title, description)
     Div(:class => "flex gap-4 items-start",
         Div(:class => "w-8 h-8 rounded-full bg-orange-100 dark:bg-yellow-950 text-orange-600 dark:text-yellow-500 flex items-center justify-center font-bold shrink-0",

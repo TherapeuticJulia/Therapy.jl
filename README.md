@@ -20,6 +20,8 @@ Pkg.add(url="https://github.com/TherapeuticJulia/Therapy.jl")
 
 ## Quick Start
 
+Create `app.jl`:
+
 ```julia
 using Therapy
 
@@ -27,46 +29,43 @@ function Counter()
     count, set_count = create_signal(0)
 
     Div(:class => "flex items-center gap-4",
-        Button(
-            :class => "px-4 py-2 bg-blue-500 text-white rounded",
-            :on_click => () -> set_count(count() - 1),
-            "-"
-        ),
+        Button(:on_click => () -> set_count(count() - 1), "-"),
         Span(:class => "text-2xl font-bold", count),
-        Button(
-            :class => "px-4 py-2 bg-blue-500 text-white rounded",
-            :on_click => () -> set_count(count() + 1),
-            "+"
-        )
+        Button(:on_click => () -> set_count(count() + 1), "+")
     )
 end
 
-# Render to HTML
-html = render_to_string(Counter())
+app = App(
+    routes_dir = "routes",
+    interactive = ["Counter" => "#counter"]
+)
+
+Therapy.run(app)
+```
+
+Run with:
+```bash
+julia --project=. app.jl dev    # Development server with HMR
+julia --project=. app.jl build  # Build static site
 ```
 
 ## File-Path Routing
 
 ```
 routes/
-  index.jl        -> /
-  about.jl        -> /about
-  users/[id].jl   -> /users/:id
+  index.jl          -> /
+  about.jl          -> /about
+  users/[id].jl     -> /users/:id
+  posts/[...slug].jl -> /posts/*
 ```
 
-```julia
-router = create_router("routes")
-html, route, params = handle_request(router, "/users/123")
-# params[:id] == "123"
-```
+Routes are Julia files that return component functions. Dynamic params are accessible via the router.
 
 ## Tailwind CSS
 
-```julia
-# Development (CDN)
-render_page(App(); head_extra=tailwind_cdn())
+Tailwind is enabled by default. Use conditional classes with `tw`:
 
-# Conditional classes
+```julia
 Div(:class => tw("flex", "items-center", is_active && "bg-blue-500"))
 ```
 
@@ -107,13 +106,15 @@ Header, Footer, Nav, Main, Section, Article
 
 ### Components
 
+Components are just Julia functions that return VNodes:
+
 ```julia
-Greeting = component(:Greeting) do props
-    name = get_prop(props, :name, "World")
+function Greeting(name="World")
     P("Hello, ", name, "!")
 end
 
-html = render_to_string(Greeting(:name => "Julia"))
+# Use like any function
+Div(Greeting("Julia"), Greeting("Therapy"))
 ```
 
 ### Conditional Rendering
@@ -124,16 +125,9 @@ Show(visible) do
 end
 ```
 
-## Examples
+## Live Demo
 
-```bash
-# Basic SSR demo
-julia --project=. examples/counter.jl
-
-# Full reactive app (Julia → Wasm)
-cd examples/todo && julia --project=../.. app.jl
-# Then open http://127.0.0.1:8080
-```
+See Therapy.jl in action at [therapeuticjulia.github.io/Therapy.jl](https://therapeuticjulia.github.io/Therapy.jl/) — including an interactive Tic-Tac-Toe game with winner detection compiled entirely to WebAssembly.
 
 ## Current Status
 

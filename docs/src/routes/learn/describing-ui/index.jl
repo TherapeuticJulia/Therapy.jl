@@ -194,10 +194,4 @@ end""")
     )
 end
 
-function CodeBlock(code)
-    Pre(:class => "bg-stone-800 dark:bg-stone-950 rounded-lg p-4 overflow-x-auto my-4",
-        Code(:class => "text-sm text-stone-100 whitespace-pre", code)
-    )
-end
-
 DescribingUI

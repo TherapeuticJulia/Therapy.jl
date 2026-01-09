@@ -41,7 +41,7 @@ function TicTacToeTutorial()
                     "Create a new Julia project and add Therapy.jl:"
                 ),
                 CodeBlock("""mkdir tictactoe && cd tictactoe
-julia --project=. -e 'using Pkg; Pkg.add(url="https://github.com/TherapeuticJulia/Therapy.jl")'"""),
+julia --project=. -e 'using Pkg; Pkg.add(url="https://github.com/TherapeuticJulia/Therapy.jl")'"""; lang="bash"),
                 P(:class => "text-stone-600 dark:text-stone-400 mb-4",
                     "Create ", Code(:class => "bg-stone-200 dark:bg-stone-700 px-1 rounded", "game.jl"), " with a simple component:"
                 ),
@@ -292,12 +292,6 @@ end""")
             )
         );
         current_path="learn/tutorial-tic-tac-toe/"
-    )
-end
-
-function CodeBlock(code)
-    Pre(:class => "bg-stone-800 dark:bg-stone-950 rounded-lg p-4 overflow-x-auto my-4",
-        Code(:class => "text-sm text-stone-100 whitespace-pre", code)
     )
 end
 

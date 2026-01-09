@@ -152,12 +152,4 @@ doubled()  # => 10""")
     )
 end
 
-function CodeBlock(code)
-    Div(:class => "bg-stone-800 dark:bg-stone-950 rounded-lg overflow-x-auto shadow-lg",
-        Pre(:class => "p-4 text-sm text-stone-100",
-            Code(:class => "language-julia", code)
-        )
-    )
-end
-
 GettingStarted
