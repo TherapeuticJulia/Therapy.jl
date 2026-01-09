@@ -37,37 +37,37 @@ function ApiIndex()
                 ApiSection(
                     "Signals",
                     "Reactive primitives for state management",
-                    "/api/signals/",
+                    "api/signals/",
                     ["create_signal", "batch", "untrack"]
                 ),
                 ApiSection(
                     "Effects",
                     "Side effects and subscriptions",
-                    "/api/effects/",
+                    "api/effects/",
                     ["create_effect", "dispose!", "on_cleanup"]
                 ),
                 ApiSection(
                     "Memos",
                     "Cached computed values",
-                    "/api/memos/",
+                    "api/memos/",
                     ["create_memo"]
                 ),
                 ApiSection(
                     "Components",
                     "Component definition and lifecycle",
-                    "/api/components/",
+                    "api/components/",
                     ["component", "render_component", "on_mount"]
                 ),
                 ApiSection(
                     "DOM Elements",
                     "HTML element constructors",
-                    "/api/elements/",
+                    "api/elements/",
                     ["Div", "Span", "Button", "Input", "..."]
                 ),
                 ApiSection(
                     "SSR",
                     "Server-side rendering utilities",
-                    "/api/ssr/",
+                    "api/ssr/",
                     ["render_to_string", "render_page"]
                 )
             ),

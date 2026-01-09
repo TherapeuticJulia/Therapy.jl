@@ -55,28 +55,28 @@ const TUTORIAL_SIDEBAR = [
     (
         title = "Tutorial",
         items = [
-            (href = "/learn/", label = "Overview"),
-            (href = "/learn/tutorial-tic-tac-toe/", label = "Tutorial: Tic-Tac-Toe"),
-            (href = "/learn/thinking-in-therapy/", label = "Thinking in Therapy.jl"),
+            (href = "learn/", label = "Overview"),
+            (href = "learn/tutorial-tic-tac-toe/", label = "Tutorial: Tic-Tac-Toe"),
+            (href = "learn/thinking-in-therapy/", label = "Thinking in Therapy.jl"),
         ]
     ),
     (
         title = "Building the Game",
         items = [
-            (href = "/learn/tutorial-tic-tac-toe/#setup", label = "1. Setup"),
-            (href = "/learn/tutorial-tic-tac-toe/#board", label = "2. Building the Board"),
-            (href = "/learn/tutorial-tic-tac-toe/#state", label = "3. Adding State"),
-            (href = "/learn/tutorial-tic-tac-toe/#turns", label = "4. Taking Turns"),
-            (href = "/learn/tutorial-tic-tac-toe/#winner", label = "5. Declaring a Winner"),
-            (href = "/learn/tutorial-tic-tac-toe/#complete", label = "6. Complete Game"),
+            (href = "learn/tutorial-tic-tac-toe/#setup", label = "1. Setup"),
+            (href = "learn/tutorial-tic-tac-toe/#board", label = "2. Building the Board"),
+            (href = "learn/tutorial-tic-tac-toe/#state", label = "3. Adding State"),
+            (href = "learn/tutorial-tic-tac-toe/#turns", label = "4. Taking Turns"),
+            (href = "learn/tutorial-tic-tac-toe/#winner", label = "5. Declaring a Winner"),
+            (href = "learn/tutorial-tic-tac-toe/#complete", label = "6. Complete Game"),
         ]
     ),
     (
         title = "Core Concepts",
         items = [
-            (href = "/learn/describing-ui/", label = "Describing the UI"),
-            (href = "/learn/adding-interactivity/", label = "Adding Interactivity"),
-            (href = "/learn/managing-state/", label = "Managing State"),
+            (href = "learn/describing-ui/", label = "Describing the UI"),
+            (href = "learn/adding-interactivity/", label = "Adding Interactivity"),
+            (href = "learn/managing-state/", label = "Managing State"),
         ]
     ),
 ]
@@ -84,7 +84,7 @@ const TUTORIAL_SIDEBAR = [
 """
 Tutorial layout with sidebar navigation.
 """
-function TutorialLayout(children...; current_path::String="/learn/")
+function TutorialLayout(children...; current_path::String="learn/")
     Layout(
         Div(:class => "flex gap-8",
             # Sidebar

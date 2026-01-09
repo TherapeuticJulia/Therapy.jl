@@ -41,14 +41,14 @@ function LearnIndex()
                     TutorialCard(
                         "Tutorial: Tic-Tac-Toe",
                         "Build a complete game step-by-step. Learn signals, event handlers, and component composition.",
-                        "/learn/tutorial-tic-tac-toe/",
+                        "learn/tutorial-tic-tac-toe/",
                         "~30 min",
                         true
                     ),
                     TutorialCard(
                         "Thinking in Therapy.jl",
                         "Learn the mental model behind fine-grained reactivity and how it differs from other frameworks.",
-                        "/learn/thinking-in-therapy/",
+                        "learn/thinking-in-therapy/",
                         "~15 min",
                         false
                     )
@@ -61,13 +61,13 @@ function LearnIndex()
                     "Core Concepts"
                 ),
                 Div(:class => "grid md:grid-cols-3 gap-4",
-                    ConceptCard("Describing the UI", "Learn how to create and compose VNodes", "/learn/describing-ui/"),
-                    ConceptCard("Adding Interactivity", "Make your UI respond to user input with signals", "/learn/adding-interactivity/"),
-                    ConceptCard("Managing State", "Organize state and data flow in your app", "/learn/managing-state/")
+                    ConceptCard("Describing the UI", "Learn how to create and compose VNodes", "learn/describing-ui/"),
+                    ConceptCard("Adding Interactivity", "Make your UI respond to user input with signals", "learn/adding-interactivity/"),
+                    ConceptCard("Managing State", "Organize state and data flow in your app", "learn/managing-state/")
                 )
             )
         );
-        current_path="/learn/"
+        current_path="learn/"
     )
 end
 

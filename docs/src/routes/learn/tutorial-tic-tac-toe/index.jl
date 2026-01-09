@@ -292,13 +292,13 @@ end"""),
             Div(:class => "not-prose mt-12 p-6 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800",
                 H3(:class => "text-lg font-semibold text-blue-800 dark:text-blue-200 mb-4", "What's Next?"),
                 Ul(:class => "space-y-2 text-blue-700 dark:text-blue-300",
-                    Li(A(:href => "/learn/thinking-in-therapy/", :class => "underline", "Thinking in Therapy.jl"), " — understand the mental model"),
-                    Li(A(:href => "/api/", :class => "underline", "API Reference"), " — explore all available functions"),
-                    Li(A(:href => "/examples/", :class => "underline", "More Examples"), " — see other components")
+                    Li(A(:href => "learn/thinking-in-therapy/", :class => "underline", "Thinking in Therapy.jl"), " — understand the mental model"),
+                    Li(A(:href => "api/", :class => "underline", "API Reference"), " — explore all available functions"),
+                    Li(A(:href => "examples/", :class => "underline", "More Examples"), " — see other components")
                 )
             )
         );
-        current_path="/learn/tutorial-tic-tac-toe/"
+        current_path="learn/tutorial-tic-tac-toe/"
     )
 end
 

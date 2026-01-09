@@ -15,18 +15,18 @@ function Layout(children...; title="Therapy.jl")
                 Div(:class => "flex justify-between h-16",
                     # Logo
                     Div(:class => "flex items-center",
-                        A(:href => "/", :class => "flex items-center",
+                        A(:href => "./", :class => "flex items-center",
                             Span(:class => "text-2xl font-bold text-orange-300 dark:text-yellow-600", "Therapy"),
                             Span(:class => "text-2xl font-light text-stone-400 dark:text-stone-500", ".jl")
                         )
                     ),
-                    # Navigation Links
+                    # Navigation Links (relative paths for base_path compatibility)
                     Div(:class => "hidden sm:flex sm:items-center sm:space-x-6",
-                        NavItem("/", "Home"),
-                        NavItem("/getting-started/", "Getting Started"),
-                        NavItem("/learn/", "Learn"),
-                        NavItem("/api/", "API"),
-                        NavItem("/examples/", "Examples"),
+                        NavItem("./", "Home"),
+                        NavItem("getting-started/", "Getting Started"),
+                        NavItem("learn/", "Learn"),
+                        NavItem("api/", "API"),
+                        NavItem("examples/", "Examples"),
                         # GitHub link
                         A(:href => "https://github.com/TherapeuticJulia/Therapy.jl",
                           :class => "text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 transition-colors",
@@ -53,7 +53,7 @@ function Layout(children...; title="Therapy.jl")
                 Div(:class => "flex justify-between items-center",
                     P(:class => "text-stone-500 dark:text-stone-400 text-sm",
                         "Built with ",
-                        A(:href => "/", :class => "text-orange-300 dark:text-yellow-600 hover:text-orange-400 dark:hover:text-yellow-500", "Therapy.jl"),
+                        A(:href => "./", :class => "text-orange-300 dark:text-yellow-600 hover:text-orange-400 dark:hover:text-yellow-500", "Therapy.jl"),
                         " - A reactive web framework for Julia"
                     ),
                     P(:class => "text-stone-400 dark:text-stone-500 text-sm",
