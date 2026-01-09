@@ -25,9 +25,9 @@ function LearnIndex()
                         "This game is built with Therapy.jl and runs as WebAssembly in your browser."
                     )
                 ),
-                # TicTacToe component placeholder - will be injected
+                # Island renders directly - no placeholder needed!
                 Div(:class => "flex justify-center",
-                    Div(:id => "tictactoe")
+                    TicTacToe()
                 )
             ),
 

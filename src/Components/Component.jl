@@ -63,9 +63,10 @@ component(name::Symbol) = render -> component(render, name)
 
 """
 Render a component instance to a VNode.
+Uses invokelatest to handle dynamically loaded components.
 """
 function render_component(instance::ComponentInstance)
-    instance.def.render(instance.props)
+    Base.invokelatest(instance.def.render, instance.props)
 end
 
 # Make ComponentInstance callable for nesting

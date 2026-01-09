@@ -183,8 +183,8 @@ Called after loading component files which register islands via island().
 function discover_islands()
     islands = InteractiveComponent[]
     for def in get_islands()
-        # Auto-generate selector from island name
-        selector = "#" * lowercase(string(def.name))
+        # Use therapy-island element as container - no manual IDs needed!
+        selector = "therapy-island[data-component=\"" * lowercase(string(def.name)) * "\"]"
         push!(islands, InteractiveComponent(string(def.name), selector, def.render_fn))
     end
     return islands
@@ -370,14 +370,23 @@ function generate_page(
     for_build::Bool=false
 )
     # Render the route component
+    # Islands render directly as <therapy-island> elements via SSR
     content = render_to_string(Base.invokelatest(component_fn))
 
-    # Inject compiled component HTML into containers
+    # For therapy-island selectors, the content is already rendered by SSR
+    # For legacy #id selectors, inject compiled HTML into placeholder containers
     for cc in compiled_components
-        selector = lstrip(cc.component.container_selector, '#')
-        pattern = Regex("<div[^>]*id=\"$selector\"[^>]*>.*?</div>", "s")
-        replacement = "<div id=\"$selector\">$(cc.html)</div>"
-        content = replace(content, pattern => replacement)
+        selector = cc.component.container_selector
+        if startswith(selector, "therapy-island")
+            # Island is already rendered by SSR - no injection needed
+            continue
+        else
+            # Legacy: inject into placeholder div with ID
+            id = lstrip(selector, '#')
+            pattern = Regex("<div[^>]*id=\"$id\"[^>]*>.*?</div>", "s")
+            replacement = "<div id=\"$id\">$(cc.html)</div>"
+            content = replace(content, pattern => replacement)
+        end
     end
 
     # Combine all hydration JS

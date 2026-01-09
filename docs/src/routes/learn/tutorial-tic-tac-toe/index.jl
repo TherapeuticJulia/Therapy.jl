@@ -21,9 +21,9 @@ function TicTacToeTutorial()
                 H2(:class => "text-xl font-bold text-stone-800 dark:text-stone-100 mb-4 text-center",
                     "Try the Finished Game"
                 ),
+                # Island renders directly - no placeholder needed!
                 Div(:class => "flex justify-center",
-                    :id => "tictactoe",
-                    Div(:class => "text-stone-400", "Loading game...")
+                    TicTacToe()
                 ),
                 P(:class => "text-sm text-stone-500 dark:text-stone-400 mt-4 text-center",
                     "This game runs entirely in WebAssembly compiled from Julia."

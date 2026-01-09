@@ -66,9 +66,10 @@ island(name::Symbol) = render_fn -> island(render_fn, name)
 
 """
 Make IslandDef callable - returns an IslandVNode for rendering.
+Uses invokelatest to handle dynamically loaded islands.
 """
 function (def::IslandDef)()
-    content = def.render_fn()
+    content = Base.invokelatest(def.render_fn)
     return IslandVNode(def.name, content)
 end
 

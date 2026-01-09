@@ -90,10 +90,9 @@ Therapy.run(app)  # julia app.jl dev""")
                 P(:class => "text-stone-600 dark:text-stone-300 mb-8 max-w-xl mx-auto",
                     "This counter is running in your browser as WebAssembly compiled from Julia using Therapy.jl. Click the buttons to see it in action!"
                 ),
-                # Placeholder - the actual compiled counter component is injected by build.jl
+                # Island renders directly - no placeholder needed!
                 Div(:class => "bg-white/50 dark:bg-stone-800/50 backdrop-blur rounded-xl p-8 max-w-md mx-auto",
-                    :id => "interactivecounter",
-                    "Loading..."
+                    InteractiveCounter()
                 )
             )
         )
