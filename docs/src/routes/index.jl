@@ -2,8 +2,6 @@
 #
 # Pluto.jl-inspired theme with violet/purple accents
 
-include("../components/Layout.jl")
-
 function Index()
     Layout(
         # Hero Section

@@ -2,8 +2,6 @@
 #
 # Pluto.jl-inspired theme with violet/purple accents
 
-include("../components/Layout.jl")
-
 function GettingStarted()
     Layout(
         Div(:class => "max-w-4xl mx-auto",

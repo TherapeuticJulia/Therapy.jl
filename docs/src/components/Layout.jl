@@ -2,8 +2,6 @@
 #
 # Pluto.jl-inspired theme with purple accents and dark mode support
 
-using Therapy
-
 """
 Main documentation layout with navigation and footer.
 Uses Pluto.jl-inspired color scheme with dark mode support.

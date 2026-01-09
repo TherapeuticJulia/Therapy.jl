@@ -35,6 +35,9 @@ include("Compiler/Compile.jl")
 # Static Site Generator
 include("SSG/StaticSite.jl")
 
+# App Framework
+include("App/App.jl")
+
 # Exports - Reactivity
 export create_signal, create_effect, create_memo, batch, dispose!
 export create_compilable_signal, CompilableSignal, CompilableSetter
@@ -75,5 +78,9 @@ export compile_component, compile_and_serve, compile_multi
 
 # Exports - Static Site Generator
 export SiteConfig, PageRoute, BuildResult, build_static_site
+
+# Exports - App Framework
+export App, InteractiveComponent
+export dev, build, run
 
 end # module

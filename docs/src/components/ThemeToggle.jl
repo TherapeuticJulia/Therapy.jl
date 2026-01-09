@@ -9,8 +9,6 @@
 #   3. :on_click handler toggles the signal
 #   4. compile_component() generates Wasm that calls set_dark_mode()
 
-using Therapy
-
 """
 Theme toggle component - compiled to WebAssembly.
 

@@ -9,8 +9,6 @@
 #   3. compile_component() analyzes this and generates Wasm bytecode
 #   4. The Wasm handles all increment/decrement/DOM-update logic
 
-using Therapy
-
 """
 Interactive counter component - compiled to WebAssembly.
 
