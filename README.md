@@ -1,14 +1,15 @@
 # Therapy.jl
 
-A reactive web framework for Julia with SolidJS-inspired fine-grained reactivity.
+A reactive web framework for Julia inspired by [Leptos](https://leptos.dev) and [SolidJS](https://solidjs.com).
 
 ## Features
 
-- **Fine-grained Reactivity**: Signals, effects, and memos for precise updates
-- **Pure Julia Syntax**: No macros needed - `divv()`, `button()`, `span()`
-- **Component System**: Reusable components with props and children
-- **Server-Side Rendering**: Generate HTML strings with hydration keys
-- **Batching**: Batch multiple updates for optimal performance
+- **Fine-grained Reactivity** - Signals, effects, and memos for precise DOM updates (no virtual DOM diffing)
+- **JSX-style Elements** - Capitalized elements like React: `Div`, `Button`, `Span`
+- **File-path Routing** - Next.js-style routing with dynamic params
+- **Tailwind CSS** - Built-in integration (CDN for dev, CLI for production)
+- **SSR + Hydration** - Server-side rendering with WebAssembly hydration
+- **Wasm Compilation** - Event handlers compile to WebAssembly via WasmTarget.jl
 
 ## Installation
 
@@ -22,103 +23,132 @@ Pkg.add(url="https://github.com/TherapeuticJulia/Therapy.jl")
 ```julia
 using Therapy
 
-# Create reactive signals
-count, set_count = create_signal(0)
+function Counter()
+    count, set_count = create_signal(0)
 
-# Create a computed value
-doubled = create_memo(() -> count() * 2)
-
-# Create a side effect
-create_effect() do
-    println("Count: ", count(), ", Doubled: ", doubled())
-end
-
-# Update the signal - effect runs automatically
-set_count(5)  # Prints: "Count: 5, Doubled: 10"
-```
-
-## Components
-
-```julia
-using Therapy
-
-# Define a component
-Counter = component(:Counter) do props
-    count, set_count = create_signal(get_prop(props, :initial, 0))
-
-    divv(:class => "counter",
-        p("Count: ", count),
-        button(:on_click => () -> set_count(count() - 1), "-"),
-        button(:on_click => () -> set_count(count() + 1), "+")
+    Div(:class => "flex items-center gap-4",
+        Button(
+            :class => "px-4 py-2 bg-blue-500 text-white rounded",
+            :on_click => () -> set_count(count() - 1),
+            "-"
+        ),
+        Span(:class => "text-2xl font-bold", count),
+        Button(
+            :class => "px-4 py-2 bg-blue-500 text-white rounded",
+            :on_click => () -> set_count(count() + 1),
+            "+"
+        )
     )
 end
 
 # Render to HTML
-html = render_to_string(Counter(:initial => 0))
+html = render_to_string(Counter())
 ```
 
-## API Reference
+## File-Path Routing
+
+```
+routes/
+  index.jl        -> /
+  about.jl        -> /about
+  users/[id].jl   -> /users/:id
+```
+
+```julia
+router = create_router("routes")
+html, route, params = handle_request(router, "/users/123")
+# params[:id] == "123"
+```
+
+## Tailwind CSS
+
+```julia
+# Development (CDN)
+render_page(App(); head_extra=tailwind_cdn())
+
+# Conditional classes
+Div(:class => tw("flex", "items-center", is_active && "bg-blue-500"))
+```
+
+## API Overview
 
 ### Reactivity
 
-| Function | Description |
-|----------|-------------|
-| `create_signal(value)` | Create a reactive signal, returns `(getter, setter)` |
-| `create_effect(fn)` | Create a side effect that tracks dependencies |
-| `create_memo(fn)` | Create a cached computed value |
-| `batch(fn)` | Batch multiple updates together |
-| `dispose!(effect)` | Stop an effect from running |
+```julia
+# Signals
+count, set_count = create_signal(0)
+count()        # read
+set_count(5)   # write
 
-### Components
+# Effects (auto-track dependencies)
+create_effect(() -> println("Count: ", count()))
 
-| Function | Description |
-|----------|-------------|
-| `component(name) do props ... end` | Define a reusable component |
-| `get_prop(props, key, default)` | Get a prop value |
-| `get_children(props)` | Get component children |
-| `render_component(instance)` | Render a component to VNode |
+# Memos (cached computations)
+doubled = create_memo(() -> count() * 2)
 
-### DOM Elements
+# Batching
+batch() do
+    set_a(1)
+    set_b(2)
+end
+```
+
+### Elements
 
 ```julia
-divv, span, p, a, button, input, form, label
-h1, h2, h3, h4, h5, h6
-ul, ol, li, table, tr, td, th
-img, video, audio
-header, footer, nav, main, section, article
-textarea, select, option
+# JSX-style capitalized names
+Div, Span, P, A, Button, Input, Form, Label
+H1, H2, H3, H4, H5, H6
+Ul, Ol, Li, Table, Tr, Td, Th
+Img, Video, Audio
+Header, Footer, Nav, Main, Section, Article
 # ... and more
 ```
 
-### SSR
+### Components
 
-| Function | Description |
-|----------|-------------|
-| `render_to_string(node)` | Render VNode tree to HTML string |
+```julia
+Greeting = component(:Greeting) do props
+    name = get_prop(props, :name, "World")
+    P("Hello, ", name, "!")
+end
 
-### Control Flow
+html = render_to_string(Greeting(:name => "Julia"))
+```
 
-| Function | Description |
-|----------|-------------|
-| `For(items, fn)` | Iterate over items |
-| `Show(condition, fn)` | Conditional rendering |
-| `Fragment(children...)` | Group elements without wrapper |
+### Conditional Rendering
+
+```julia
+Show(visible) do
+    Div("I'm visible!")
+end
+```
 
 ## Examples
 
-See the `examples/` directory:
-
 ```bash
+# Basic counter
 julia --project=. examples/counter.jl
+
+# Todo app with routing
+cd examples/todo && julia --project=../.. app.jl
 ```
 
-## Roadmap
+## Current Status
 
-- [ ] Client-side DOM rendering
-- [ ] Hydration (SSR to client handoff)
-- [ ] WasmTarget.jl integration (compile to WebAssembly)
-- [ ] Router
-- [ ] Sessions.jl (reactive notebooks)
+| Feature | Status |
+|---------|--------|
+| Signals, Effects, Memos | ✅ |
+| JSX-style elements | ✅ |
+| SSR with hydration keys | ✅ |
+| File-path routing | ✅ |
+| Tailwind CSS | ✅ |
+| Show conditional | ✅ |
+| Event → Wasm compilation | ✅ |
+| Two-way input binding | ✅ |
+| Resources (async) | 🚧 |
+| Context API | 🚧 |
+| Server functions | 🚧 |
 
 ## Related Projects
 
