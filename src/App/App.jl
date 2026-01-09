@@ -1,21 +1,18 @@
 # App.jl - Application framework for Therapy.jl
 #
 # Provides a clean API for building Therapy.jl applications with:
-# - `dev(app)` - Development server with live reload
+# - File-based routing (Next.js style)
+# - `dev(app)` - Development server with HMR via Revise.jl
 # - `build(app)` - Static site generation
 #
 # Example app.jl:
 #   using Therapy
-#   include("components/Layout.jl")
-#   include("components/Counter.jl")
 #
 #   app = App(
-#       routes = [
-#           "/" => IndexPage,
-#           "/about/" => AboutPage,
-#       ],
+#       routes_dir = "src/routes",
+#       components_dir = "src/components",
 #       interactive = [
-#           Counter => "#counter-demo",
+#           "InteractiveCounter" => "#counter-demo",
 #       ],
 #       title = "My App"
 #   )
@@ -31,23 +28,29 @@ Interactive component configuration.
 Specifies where to inject compiled Wasm components.
 """
 struct InteractiveComponent
-    component::Function
+    name::String              # Component name (file name without .jl)
     container_selector::String
+    component::Union{Function, Nothing}  # Loaded component function
 end
 
 """
 Application configuration.
 """
-struct App
-    routes::Vector{Pair{String, Function}}
+mutable struct App
+    routes_dir::String
+    components_dir::String
+    routes::Vector{Pair{String, Function}}  # Discovered routes
     interactive::Vector{InteractiveComponent}
     title::String
     layout::Union{Function, Nothing}
     output_dir::String
     tailwind::Bool
     dark_mode::Bool
+    _loaded::Bool  # Whether components/routes have been loaded
 
     function App(;
+        routes_dir::String = "src/routes",
+        components_dir::String = "src/components",
         routes::Vector = Pair{String, Function}[],
         interactive::Vector = [],
         title::String = "Therapy.jl App",
@@ -62,10 +65,10 @@ struct App
             if item isa InteractiveComponent
                 push!(ic, item)
             elseif item isa Pair
-                push!(ic, InteractiveComponent(item.first, item.second))
+                push!(ic, InteractiveComponent(string(item.first), item.second, nothing))
             end
         end
-        new(routes, ic, title, layout, output_dir, tailwind, dark_mode)
+        new(routes_dir, components_dir, routes, ic, title, layout, output_dir, tailwind, dark_mode, false)
     end
 end
 
@@ -74,29 +77,221 @@ Compiled interactive component with Wasm and hydration.
 """
 struct CompiledInteractive
     component::InteractiveComponent
-    compiled::Any  # CompiledInteractive from Compile.jl
+    compiled::Any
     html::String
     js::String
     wasm_bytes::Vector{UInt8}
     wasm_filename::String
 end
 
-"""
-    compile_interactive_components(app::App) -> Vector{CompiledInteractive}
+# =============================================================================
+# File-based Route Discovery
+# =============================================================================
 
+"""
+Discover routes from the routes directory.
+Returns vector of (path, file_path) pairs.
+"""
+function discover_routes(routes_dir::String)::Vector{Tuple{String, String}}
+    routes = Tuple{String, String}[]
+
+    if !isdir(routes_dir)
+        return routes
+    end
+
+    scan_routes_dir!(routes, routes_dir, routes_dir)
+
+    # Sort: specific routes before dynamic, index files last in their directory
+    sort!(routes, by = r -> route_sort_key(r[1]))
+
+    return routes
+end
+
+"""
+Recursively scan directory for route files.
+"""
+function scan_routes_dir!(routes::Vector{Tuple{String, String}}, base_dir::String, current_dir::String)
+    for entry in readdir(current_dir)
+        full_path = joinpath(current_dir, entry)
+
+        if isdir(full_path)
+            scan_routes_dir!(routes, base_dir, full_path)
+        elseif endswith(entry, ".jl")
+            route_path = file_to_route_path(base_dir, full_path)
+            push!(routes, (route_path, full_path))
+        end
+    end
+end
+
+"""
+Convert file path to route path.
+"""
+function file_to_route_path(base_dir::String, file_path::String)::String
+    rel = relpath(file_path, base_dir)
+    rel = replace(rel, r"\.jl$" => "")
+
+    # Handle index files
+    if endswith(rel, "index")
+        rel = replace(rel, r"/?index$" => "")
+    end
+
+    parts = split(rel, ['/', '\\'])
+    route_parts = String[]
+
+    for part in parts
+        isempty(part) && continue
+
+        if startswith(part, "[...") && endswith(part, "]")
+            # Catch-all: [...slug] -> *
+            push!(route_parts, "*")
+        elseif startswith(part, "[") && endswith(part, "]")
+            # Dynamic: [id] -> :id
+            param = part[2:end-1]
+            push!(route_parts, ":" * param)
+        else
+            push!(route_parts, part)
+        end
+    end
+
+    path = "/" * join(route_parts, "/")
+    return path == "/" ? "/" : rstrip(path, '/')
+end
+
+"""
+Sort key for routes (specific before dynamic).
+"""
+function route_sort_key(path::String)
+    score = 0
+    if contains(path, "*")
+        score += 1000
+    end
+    score += count(':', path) * 10
+    score += length(path)
+    return score
+end
+
+# =============================================================================
+# Component Loading
+# =============================================================================
+
+"""
+Load all components and routes for the app.
+"""
+function load_app!(app::App)
+    app._loaded && return
+
+    println("Loading app...")
+
+    # Load components first (they may be used by routes)
+    if isdir(app.components_dir)
+        println("  Loading components from $(app.components_dir)/")
+        for file in readdir(app.components_dir)
+            if endswith(file, ".jl")
+                path = joinpath(app.components_dir, file)
+                println("    - $file")
+                include(path)
+            end
+        end
+    end
+
+    # Load interactive component functions
+    for (i, ic) in enumerate(app.interactive)
+        component_file = joinpath(app.components_dir, "$(ic.name).jl")
+        if isfile(component_file)
+            # Component should define a function with same name
+            fn = Base.invokelatest(eval, Symbol(ic.name))
+            app.interactive[i] = InteractiveComponent(ic.name, ic.container_selector, fn)
+        else
+            @warn "Interactive component not found: $(ic.name) at $component_file"
+        end
+    end
+
+    # Discover and load routes
+    if isdir(app.routes_dir) && isempty(app.routes)
+        println("  Discovering routes from $(app.routes_dir)/")
+        discovered = discover_routes(app.routes_dir)
+
+        for (route_path, file_path) in discovered
+            println("    $route_path -> $(relpath(file_path, app.routes_dir))")
+            # Load the route file - it should return a function
+            route_fn = include(file_path)
+            if route_fn isa Function
+                push!(app.routes, route_path => route_fn)
+            else
+                @warn "Route file $file_path should return a Function, got $(typeof(route_fn))"
+            end
+        end
+    end
+
+    app._loaded = true
+    println("  Loaded $(length(app.routes)) routes, $(length(app.interactive)) interactive components")
+end
+
+"""
+Reload a specific file (for HMR).
+"""
+function reload_file!(app::App, file_path::String)
+    println("  Reloading: $file_path")
+
+    try
+        # Re-include the file
+        result = include(file_path)
+
+        # If it's a route file, update the route
+        if startswith(file_path, app.routes_dir)
+            route_path = file_to_route_path(app.routes_dir, file_path)
+            if result isa Function
+                # Update existing route or add new one
+                idx = findfirst(r -> r.first == route_path, app.routes)
+                if idx !== nothing
+                    app.routes[idx] = route_path => result
+                else
+                    push!(app.routes, route_path => result)
+                end
+            end
+        end
+
+        # If it's a component file, update interactive components
+        if startswith(file_path, app.components_dir)
+            component_name = replace(basename(file_path), ".jl" => "")
+            for (i, ic) in enumerate(app.interactive)
+                if ic.name == component_name && result isa Function
+                    app.interactive[i] = InteractiveComponent(ic.name, ic.container_selector, result)
+                end
+            end
+        end
+
+        return true
+    catch e
+        @error "Error reloading $file_path" exception=(e, catch_backtrace())
+        return false
+    end
+end
+
+# =============================================================================
+# Component Compilation
+# =============================================================================
+
+"""
 Compile all interactive components to Wasm.
 """
-function compile_interactive_components(app::App)
+function compile_interactive_components(app::App)::Vector{CompiledInteractive}
     compiled = CompiledInteractive[]
 
-    for (i, ic) in enumerate(app.interactive)
-        println("  Compiling $(nameof(ic.component))...")
+    for ic in app.interactive
+        if ic.component === nothing
+            @warn "Skipping unloaded component: $(ic.name)"
+            continue
+        end
+
+        println("  Compiling $(ic.name)...")
 
         # Compile with container selector for scoped DOM queries
-        result = compile_component(ic.component; container_selector=ic.container_selector)
+        # Use invokelatest to handle world age issues from dynamic loading
+        result = Base.invokelatest(compile_component, ic.component; container_selector=ic.container_selector)
 
         # Generate unique wasm filename
-        wasm_filename = "$(lowercase(string(nameof(ic.component)))).wasm"
+        wasm_filename = "$(lowercase(ic.name)).wasm"
 
         # Adjust hydration JS to use correct wasm path
         js = replace(result.hydration.js, "./app.wasm" => "./$wasm_filename")
@@ -116,6 +311,10 @@ function compile_interactive_components(app::App)
     return compiled
 end
 
+# =============================================================================
+# HTML Generation
+# =============================================================================
+
 """
 Generate full HTML page with injected components.
 """
@@ -130,9 +329,9 @@ function generate_page(
 
     # Inject compiled component HTML into containers
     for cc in compiled_components
-        # Replace container placeholder with compiled HTML
-        pattern = Regex("<div[^>]*id=\"$(lstrip(cc.component.container_selector, '#'))\"[^>]*>.*?</div>", "s")
-        replacement = "<div id=\"$(lstrip(cc.component.container_selector, '#'))\">$(cc.html)</div>"
+        selector = lstrip(cc.component.container_selector, '#')
+        pattern = Regex("<div[^>]*id=\"$selector\"[^>]*>.*?</div>", "s")
+        replacement = "<div id=\"$selector\">$(cc.html)</div>"
         content = replace(content, pattern => replacement)
     end
 
@@ -156,7 +355,6 @@ function generate_page(
     <title>$(page_title)</title>
 """
 
-    # Tailwind CSS
     if app.tailwind
         html *= """
     <script src="https://cdn.tailwindcss.com"></script>
@@ -175,7 +373,6 @@ function generate_page(
 """
     end
 
-    # Fonts and syntax highlighting
     html *= """
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -187,7 +384,6 @@ function generate_page(
     </style>
 """
 
-    # Dark mode init script
     if app.dark_mode
         html *= """
     <script>
@@ -211,7 +407,6 @@ $(content)
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-julia.min.js"></script>
 """
 
-    # Add hydration JS
     if !isempty(all_js)
         html *= """
     <script>
@@ -228,21 +423,111 @@ $(all_js)
     return html
 end
 
+# =============================================================================
+# Development Server with HMR
+# =============================================================================
+
 """
     dev(app::App; port::Int=8080, host::String="127.0.0.1")
 
-Start development server for a Therapy.jl application.
+Start development server with hot module reloading.
+
+Uses Revise.jl if available for automatic code reloading.
 """
 function dev(app::App; port::Int=8080, host::String="127.0.0.1")
     println("\n━━━ Therapy.jl Dev Server ━━━")
-    println("Compiling interactive components...")
+    println("Hot Module Reloading enabled")
 
+    # Load app using standard load_app! (which uses include)
+    load_app!(app)
+
+    # Compile interactive components
+    println("\nCompiling interactive components...")
     compiled_components = compile_interactive_components(app)
 
-    println("\nStarting server on http://$host:$port")
+    # Track file modification times for HMR
+    file_mtimes = Dict{String, Float64}()
+
+    function track_files()
+        for dir in [app.routes_dir, app.components_dir]
+            isdir(dir) || continue
+            for (root, _, files) in walkdir(dir)
+                for file in files
+                    endswith(file, ".jl") || continue
+                    path = joinpath(root, file)
+                    file_mtimes[path] = mtime(path)
+                end
+            end
+        end
+    end
+
+    track_files()
+    println("  Watching $(length(file_mtimes)) files for changes")
+
+    function check_for_changes()
+        # Check if any files changed (for re-including and recompiling Wasm)
+        changed = String[]
+        for (path, old_mtime) in file_mtimes
+            if isfile(path) && mtime(path) > old_mtime
+                push!(changed, path)
+                file_mtimes[path] = mtime(path)
+            end
+        end
+        return changed
+    end
+
+    # Try to find an available port
+    function find_available_port(start_port, max_attempts=10)
+        for attempt in 0:max_attempts-1
+            test_port = start_port + attempt
+            try
+                # Try to bind briefly to check if port is available
+                server = Sockets.listen(Sockets.IPv4(host), test_port)
+                close(server)
+                return test_port
+            catch e
+                if attempt == max_attempts - 1
+                    error("Could not find available port (tried $start_port-$(start_port + max_attempts - 1))")
+                end
+            end
+        end
+        return start_port
+    end
+
+    actual_port = find_available_port(port)
+    if actual_port != port
+        println("\nNote: Port $port in use, using port $actual_port instead")
+    end
+
+    println("\nStarting server on http://$host:$actual_port")
     println("Press Ctrl+C to stop\n")
 
-    server = HTTP.serve!(host, port) do request
+    # Last check time for polling
+    last_check = time()
+    check_interval = 1.0  # Check every second
+
+    server = HTTP.serve!(host, actual_port) do request
+        # Check for file changes
+        if time() - last_check > check_interval
+            changed = check_for_changes()
+            if !isempty(changed)
+                println("\n━━━ Files changed ━━━")
+
+                # Reload each changed file
+                for file in changed
+                    reload_file!(app, file)
+                end
+
+                # Recompile interactive components if any component changed
+                if any(f -> contains(f, app.components_dir), changed)
+                    println("  Recompiling Wasm...")
+                    compiled_components = compile_interactive_components(app)
+                end
+                println("━━━ Ready ━━━\n")
+            end
+            last_check = time()
+        end
+
         path = HTTP.URI(request.target).path
         path = path == "" ? "/" : path
 
@@ -255,11 +540,13 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
 
         # Match routes
         for (route_path, component_fn) in app.routes
-            if path == route_path || (endswith(route_path, "/") && path == rstrip(route_path, '/'))
+            route_match = route_path == path ||
+                         (endswith(route_path, "/") && path == rstrip(route_path, '/')) ||
+                         (path == route_path * "/")
+
+            if route_match
                 try
-                    # Only include components for their designated routes
-                    # For now, include all components (can be refined later)
-                    html = Base.invokelatest(generate_page, app, path, component_fn, compiled_components)
+                    html = Base.invokelatest(generate_page, app, String(path), component_fn, compiled_components)
                     return HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"], html)
                 catch e
                     @error "Error rendering page" exception=(e, catch_backtrace())
@@ -283,6 +570,10 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
     end
 end
 
+# =============================================================================
+# Static Site Build
+# =============================================================================
+
 """
     build(app::App)
 
@@ -291,6 +582,9 @@ Build static site from a Therapy.jl application.
 function build(app::App)
     println("\n━━━ Therapy.jl Static Build ━━━")
     println("Output: $(app.output_dir)")
+
+    # Load app
+    load_app!(app)
 
     # Clean and create output directory
     rm(app.output_dir, recursive=true, force=true)
@@ -310,6 +604,12 @@ function build(app::App)
     # Build pages
     println("\nBuilding pages...")
     for (route_path, component_fn) in app.routes
+        # Skip dynamic routes for static build
+        if contains(route_path, ":") || contains(route_path, "*")
+            println("  Skipping dynamic route: $route_path")
+            continue
+        end
+
         println("  Building: $route_path")
 
         html = generate_page(app, route_path, component_fn, compiled_components)
@@ -371,11 +671,15 @@ function build(app::App)
     end
 end
 
+# =============================================================================
+# CLI Entry Point
+# =============================================================================
+
 """
     run(app::App)
 
 Run the app based on command line arguments.
-- `julia app.jl dev` - Start development server
+- `julia app.jl dev` - Start development server with HMR
 - `julia app.jl build` - Build static site
 """
 function run(app::App)
@@ -385,7 +689,7 @@ function run(app::App)
         dev(app)
     else
         println("Usage: julia app.jl [dev|build]")
-        println("  dev   - Start development server")
-        println("  build - Build static site")
+        println("  dev   - Start development server with HMR")
+        println("  build - Build static site to $(app.output_dir)/")
     end
 end

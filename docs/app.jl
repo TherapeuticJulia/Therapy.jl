@@ -1,44 +1,38 @@
 #!/usr/bin/env julia
 # Therapy.jl Documentation Site
 #
-# Usage:
-#   julia --project=.. app.jl dev    # Development server
-#   julia --project=.. app.jl build  # Build static site
+# Usage (from Therapy.jl root directory):
+#   julia --project=. docs/app.jl dev    # Development server with HMR
+#   julia --project=. docs/app.jl build  # Build static site to docs/dist
 #
-# The docs site uses Therapy.jl's App framework - it's fully dogfooded!
+# This site dogfoods Therapy.jl's App framework with:
+# - File-based routing from src/routes/
+# - Automatic component loading from src/components/
+# - Interactive Wasm components with HMR in dev mode
 
-# Add WasmTarget to load path
+# Ensure we're using the local Therapy.jl package
+# and WasmTarget.jl from the sibling directory
+if !haskey(ENV, "JULIA_PROJECT")
+    # Running without --project, add paths manually
+    push!(LOAD_PATH, dirname(@__DIR__))  # Add Therapy.jl
+end
 push!(LOAD_PATH, joinpath(dirname(@__DIR__), "..", "WasmTarget.jl"))
 
 using Therapy
 
-# =============================================================================
-# Components - Reusable UI pieces
-# =============================================================================
-
-include("src/components/Layout.jl")
-include("src/components/InteractiveCounter.jl")
-include("src/components/ThemeToggle.jl")
-
-# =============================================================================
-# Routes - Pages of the site
-# =============================================================================
-
-include("src/routes/index.jl")
-include("src/routes/getting-started.jl")
+# Change to docs directory for relative paths
+cd(@__DIR__)
 
 # =============================================================================
 # App Configuration
 # =============================================================================
 
 app = App(
-    routes = [
-        "/" => Index,
-        "/getting-started/" => GettingStarted,
-    ],
+    routes_dir = "src/routes",
+    components_dir = "src/components",
     interactive = [
-        InteractiveCounter => "#counter-demo",
-        ThemeToggle => "#theme-toggle",
+        "InteractiveCounter" => "#counter-demo",
+        "ThemeToggle" => "#theme-toggle",
     ],
     title = "Therapy.jl",
     output_dir = "dist"

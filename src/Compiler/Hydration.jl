@@ -99,27 +99,16 @@ $(container_init)
     const queryEl = (hk) => $(query_base).querySelector('[data-hk="' + hk + '"]');
 
     // DOM imports for Wasm
+    // All numeric values are passed as f64 (JavaScript numbers)
     const imports = {
         dom: {
-            update_text_i32: (hk, value) => {
+            update_text: (hk, value) => {
                 const el = queryEl(hk);
                 if (el) {
-                    el.textContent = value;
-                    console.log('%c[Wasm→DOM] update_text_i32(hk=' + hk + ', value=' + value + ')', 'color: #51cf66');
-                }
-            },
-            update_text_f64: (hk, value) => {
-                const el = queryEl(hk);
-                if (el) {
-                    el.textContent = value;
-                    console.log('%c[Wasm→DOM] update_text_f64(hk=' + hk + ', value=' + value + ')', 'color: #51cf66');
-                }
-            },
-            update_attr: (hk, attr, value) => {
-                const el = queryEl(hk);
-                if (el) {
-                    el.setAttribute(attr, value);
-                    console.log('%c[Wasm→DOM] update_attr(hk=' + hk + ')', 'color: #51cf66');
+                    // Format the value - if it's a whole number, show as integer
+                    const displayValue = Number.isInteger(value) ? Math.trunc(value) : value;
+                    el.textContent = displayValue;
+                    console.log('%c[Wasm→DOM] update_text(hk=' + hk + ', value=' + displayValue + ')', 'color: #51cf66');
                 }
             },
             set_visible: (hk, visible) => {
@@ -187,9 +176,9 @@ function generate_theme_init(analysis::ComponentAnalysis)
     for theme_binding in analysis.theme_bindings
         signal_id = theme_binding.signal_id
         push!(inits, """
-    // Sync theme signal with DOM state
+    // Sync theme signal with DOM state (use BigInt for i64 Wasm globals)
     if (document.documentElement.classList.contains('dark') && wasm.set_signal_$(signal_id)) {
-        wasm.set_signal_$(signal_id)(1);
+        wasm.set_signal_$(signal_id)(1n);
         console.log('%c[Hydration] Theme signal synced: dark mode active', 'color: #9775fa');
     }""")
     end

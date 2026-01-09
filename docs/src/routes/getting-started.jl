@@ -1,26 +1,26 @@
 # Getting Started page
 #
-# Pluto.jl-inspired theme with violet/purple accents
+# Muted pastel color scheme with warm stone backgrounds and soft orange accents
 
 function GettingStarted()
     Layout(
         Div(:class => "max-w-4xl mx-auto",
             # Page Header
             Div(:class => "mb-12",
-                H1(:class => "text-4xl font-bold text-slate-900 dark:text-white mb-4",
+                H1(:class => "text-4xl font-bold text-stone-800 dark:text-stone-100 mb-4",
                     "Getting Started"
                 ),
-                P(:class => "text-xl text-slate-500 dark:text-slate-400",
+                P(:class => "text-xl text-stone-500 dark:text-stone-400",
                     "Get up and running with Therapy.jl in minutes."
                 )
             ),
 
             # Installation
             Section(:class => "mb-12",
-                H2(:class => "text-2xl font-bold text-slate-900 dark:text-white mb-4",
+                H2(:class => "text-2xl font-bold text-stone-800 dark:text-stone-100 mb-4",
                     "Installation"
                 ),
-                P(:class => "text-slate-600 dark:text-slate-300 mb-4",
+                P(:class => "text-stone-600 dark:text-stone-300 mb-4",
                     "Therapy.jl requires Julia 1.9 or later. Install it from the Julia REPL:"
                 ),
                 CodeBlock("""julia> using Pkg
@@ -29,10 +29,10 @@ julia> Pkg.add(url="https://github.com/TherapeuticJulia/Therapy.jl")""")
 
             # Quick Start
             Section(:class => "mb-12",
-                H2(:class => "text-2xl font-bold text-slate-900 dark:text-white mb-4",
+                H2(:class => "text-2xl font-bold text-stone-800 dark:text-stone-100 mb-4",
                     "Quick Start"
                 ),
-                P(:class => "text-slate-600 dark:text-slate-300 mb-4",
+                P(:class => "text-stone-600 dark:text-stone-300 mb-4",
                     "Create your first reactive component:"
                 ),
                 CodeBlock("""using Therapy
@@ -53,23 +53,23 @@ end
 # Render to HTML string
 html = render_to_string(Counter())
 println(html)"""),
-                P(:class => "text-slate-600 dark:text-slate-300 mt-4",
+                P(:class => "text-stone-600 dark:text-stone-300 mt-4",
                     "That's it! You've created a reactive component that can be rendered to HTML."
                 )
             ),
 
             # Core Concepts
             Section(:class => "mb-12",
-                H2(:class => "text-2xl font-bold text-slate-900 dark:text-white mb-6",
+                H2(:class => "text-2xl font-bold text-stone-800 dark:text-stone-100 mb-6",
                     "Core Concepts"
                 ),
 
                 # Signals
                 Div(:class => "mb-8",
-                    H3(:class => "text-xl font-semibold text-slate-900 dark:text-white mb-3",
+                    H3(:class => "text-xl font-semibold text-stone-800 dark:text-stone-100 mb-3",
                         "Signals"
                     ),
-                    P(:class => "text-slate-600 dark:text-slate-300 mb-4",
+                    P(:class => "text-stone-600 dark:text-stone-300 mb-4",
                         "Signals are the foundation of Therapy.jl's reactivity. They hold values that can change over time and automatically track dependencies."
                     ),
                     CodeBlock("""# Create a signal
@@ -85,10 +85,10 @@ count()  # => 5""")
 
                 # Effects
                 Div(:class => "mb-8",
-                    H3(:class => "text-xl font-semibold text-slate-900 dark:text-white mb-3",
+                    H3(:class => "text-xl font-semibold text-stone-800 dark:text-stone-100 mb-3",
                         "Effects"
                     ),
-                    P(:class => "text-slate-600 dark:text-slate-300 mb-4",
+                    P(:class => "text-stone-600 dark:text-stone-300 mb-4",
                         "Effects run code when their signal dependencies change. Perfect for side effects like logging or API calls."
                     ),
                     CodeBlock("""count, set_count = create_signal(0)
@@ -104,10 +104,10 @@ set_count(2)  # Prints: "Count is now: 2\"""")
 
                 # Memos
                 Div(:class => "mb-8",
-                    H3(:class => "text-xl font-semibold text-slate-900 dark:text-white mb-3",
+                    H3(:class => "text-xl font-semibold text-stone-800 dark:text-stone-100 mb-3",
                         "Memos"
                     ),
-                    P(:class => "text-slate-600 dark:text-slate-300 mb-4",
+                    P(:class => "text-stone-600 dark:text-stone-300 mb-4",
                         "Memos are cached computed values that only recalculate when their dependencies change."
                     ),
                     CodeBlock("""count, set_count = create_signal(2)
@@ -122,26 +122,26 @@ doubled()  # => 10""")
             ),
 
             # Next Steps
-            Section(:class => "mb-12 bg-slate-100 dark:bg-slate-800 rounded-xl p-8 transition-colors duration-200",
-                H2(:class => "text-2xl font-bold text-slate-900 dark:text-white mb-4",
+            Section(:class => "mb-12 bg-orange-100/50 dark:bg-orange-300/10 rounded-xl p-8 transition-colors duration-200",
+                H2(:class => "text-2xl font-bold text-stone-800 dark:text-stone-100 mb-4",
                     "Next Steps"
                 ),
                 Ul(:class => "space-y-3",
                     Li(:class => "flex items-center gap-3",
-                        Span(:class => "text-violet-600 dark:text-violet-400", "→"),
-                        A(:href => "/api/signals/", :class => "text-violet-600 dark:text-violet-400 hover:text-violet-500 dark:hover:text-violet-300",
+                        Span(:class => "text-orange-400 dark:text-orange-300", "→"),
+                        A(:href => "/api/signals/", :class => "text-orange-400 dark:text-orange-300 hover:text-orange-500 dark:hover:text-orange-200",
                             "Read the full Signals API documentation"
                         )
                     ),
                     Li(:class => "flex items-center gap-3",
-                        Span(:class => "text-violet-600 dark:text-violet-400", "→"),
-                        A(:href => "/examples/", :class => "text-violet-600 dark:text-violet-400 hover:text-violet-500 dark:hover:text-violet-300",
+                        Span(:class => "text-orange-400 dark:text-orange-300", "→"),
+                        A(:href => "/examples/", :class => "text-orange-400 dark:text-orange-300 hover:text-orange-500 dark:hover:text-orange-200",
                             "Explore interactive examples"
                         )
                     ),
                     Li(:class => "flex items-center gap-3",
-                        Span(:class => "text-violet-600 dark:text-violet-400", "→"),
-                        A(:href => "/api/components/", :class => "text-violet-600 dark:text-violet-400 hover:text-violet-500 dark:hover:text-violet-300",
+                        Span(:class => "text-orange-400 dark:text-orange-300", "→"),
+                        A(:href => "/api/components/", :class => "text-orange-400 dark:text-orange-300 hover:text-orange-500 dark:hover:text-orange-200",
                             "Learn about Components and SSR"
                         )
                     )
@@ -152,8 +152,8 @@ doubled()  # => 10""")
 end
 
 function CodeBlock(code)
-    Div(:class => "bg-slate-900 dark:bg-slate-950 rounded-lg overflow-x-auto shadow-lg",
-        Pre(:class => "p-4 text-sm text-slate-100",
+    Div(:class => "bg-stone-800 dark:bg-stone-950 rounded-lg overflow-x-auto shadow-lg",
+        Pre(:class => "p-4 text-sm text-stone-100",
             Code(:class => "language-julia", code)
         )
     )
