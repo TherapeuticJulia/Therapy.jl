@@ -24,6 +24,7 @@ function Layout(children...; title="Therapy.jl")
                     Div(:class => "hidden sm:flex sm:items-center sm:space-x-6",
                         NavItem("/", "Home"),
                         NavItem("/getting-started/", "Getting Started"),
+                        NavItem("/learn/", "Learn"),
                         NavItem("/api/", "API"),
                         NavItem("/examples/", "Examples"),
                         # GitHub link
