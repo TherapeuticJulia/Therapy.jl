@@ -118,3 +118,37 @@ function parse_element_args(args...; kwargs...)
 
     return props, children
 end
+
+"""
+A list render node for iterating over collections.
+Similar to SolidJS's <For> component.
+"""
+struct ForNode
+    items::Any           # Items to iterate (can be signal getter or vector)
+    render::Function     # Function that takes (item, index) and returns VNode
+end
+
+"""
+    For(items) do item, index
+        ...
+    end -> ForNode
+
+Render a list of items.
+
+# Examples
+```julia
+items, set_items = create_signal(["a", "b", "c"])
+
+For(items) do item, index
+    Li(item)
+end
+```
+"""
+function For(render::Function, items)
+    ForNode(items, render)
+end
+
+# Alternative syntax: For(items, render)
+function For(items, render::Function)
+    ForNode(items, render)
+end

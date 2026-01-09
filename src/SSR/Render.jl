@@ -194,6 +194,22 @@ function render_html!(io::IO, node::Vector, ctx::SSRContext)
     end
 end
 
+function render_html!(io::IO, node::ForNode, ctx::SSRContext)
+    # Get the items (could be a signal getter or a vector)
+    items = node.items isa Function ? node.items() : node.items
+
+    # Render each item
+    for (index, item) in enumerate(items)
+        # Try to call with (item, index), fall back to just (item)
+        rendered = try
+            node.render(item, index)
+        catch
+            node.render(item)
+        end
+        render_html!(io, rendered, ctx)
+    end
+end
+
 """
 Render props as HTML attributes.
 """

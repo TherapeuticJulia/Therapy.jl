@@ -44,7 +44,7 @@ export create_signal, create_effect, create_memo, batch, dispose!
 export create_compilable_signal, CompilableSignal, CompilableSetter
 
 # Exports - DOM Elements (Capitalized like JSX)
-export VNode, Fragment, Show, RawHtml
+export VNode, Fragment, Show, For, ForNode, RawHtml
 export Div, Span, P, A, Button, Input, Form, Label, Br, Hr
 export H1, H2, H3, H4, H5, H6, Strong, Em, Code, Pre, Blockquote
 export Ul, Ol, Li, Dl, Dt, Dd
