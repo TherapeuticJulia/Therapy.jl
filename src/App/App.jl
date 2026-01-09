@@ -277,7 +277,7 @@ end
 """
 Compile all interactive components to Wasm.
 """
-function compile_interactive_components(app::App)::Vector{CompiledInteractive}
+function compile_interactive_components(app::App; for_build::Bool=false)::Vector{CompiledInteractive}
     compiled = CompiledInteractive[]
 
     for ic in app.interactive
@@ -295,9 +295,14 @@ function compile_interactive_components(app::App)::Vector{CompiledInteractive}
         # Generate unique wasm filename
         wasm_filename = "$(lowercase(ic.name)).wasm"
 
-        # Adjust hydration JS to use absolute path with base_path
-        # This ensures it works from any subdirectory and on GitHub Pages subpaths
-        wasm_path = isempty(app.base_path) ? "/$wasm_filename" : "$(app.base_path)/$wasm_filename"
+        # Adjust hydration JS to use correct wasm path
+        # In dev mode: use root-relative path (/)
+        # In build mode: use base_path for GitHub Pages subpaths
+        wasm_path = if for_build && !isempty(app.base_path)
+            "$(app.base_path)/$wasm_filename"
+        else
+            "/$wasm_filename"
+        end
         js = replace(result.hydration.js, "./app.wasm" => wasm_path)
 
         push!(compiled, CompiledInteractive(
@@ -326,7 +331,8 @@ function generate_page(
     app::App,
     route_path::String,
     component_fn::Function,
-    compiled_components::Vector{CompiledInteractive}
+    compiled_components::Vector{CompiledInteractive};
+    for_build::Bool=false
 )
     # Render the route component
     content = render_to_string(Base.invokelatest(component_fn))
@@ -350,8 +356,11 @@ function generate_page(
     end
 
     # Build HTML document
-    # Add base tag for GitHub Pages subpath deployment
-    base_tag = isempty(app.base_path) ? "" : "\n    <base href=\"$(app.base_path)/\">"
+    # Add base tag for proper relative URL resolution
+    # In build mode: use base_path for GitHub Pages subpath deployment
+    # In dev mode: use "/" so relative links work from any page
+    base_href = (for_build && !isempty(app.base_path)) ? "$(app.base_path)/" : "/"
+    base_tag = "\n    <base href=\"$base_href\">"
 
     html = """
 <!DOCTYPE html>
@@ -597,9 +606,9 @@ function build(app::App)
     rm(app.output_dir, recursive=true, force=true)
     mkpath(app.output_dir)
 
-    # Compile interactive components
+    # Compile interactive components (for_build=true to use base_path)
     println("\nCompiling interactive components...")
-    compiled_components = compile_interactive_components(app)
+    compiled_components = compile_interactive_components(app; for_build=true)
 
     # Write Wasm files
     for cc in compiled_components
@@ -619,7 +628,7 @@ function build(app::App)
 
         println("  Building: $route_path")
 
-        html = generate_page(app, route_path, component_fn, compiled_components)
+        html = generate_page(app, route_path, component_fn, compiled_components; for_build=true)
 
         # Determine output path
         if route_path == "/"
