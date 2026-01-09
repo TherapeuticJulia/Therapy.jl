@@ -41,7 +41,9 @@ app = App(
         "ThemeToggle" => "#theme-toggle",
     ],
     title = "Therapy.jl",
-    output_dir = "dist"
+    output_dir = "dist",
+    # Base path for GitHub Pages (https://therapeuticjulia.github.io/Therapy.jl/)
+    base_path = "/Therapy.jl"
 )
 
 # =============================================================================

@@ -46,6 +46,7 @@ mutable struct App
     output_dir::String
     tailwind::Bool
     dark_mode::Bool
+    base_path::String  # Base path for deployment (e.g., "/Therapy.jl" for GitHub Pages)
     _loaded::Bool  # Whether components/routes have been loaded
 
     function App(;
@@ -57,7 +58,8 @@ mutable struct App
         layout::Union{Function, Nothing} = nothing,
         output_dir::String = "dist",
         tailwind::Bool = true,
-        dark_mode::Bool = true
+        dark_mode::Bool = true,
+        base_path::String = ""
     )
         # Convert interactive to InteractiveComponent if needed
         ic = InteractiveComponent[]
@@ -68,7 +70,7 @@ mutable struct App
                 push!(ic, InteractiveComponent(string(item.first), item.second, nothing))
             end
         end
-        new(routes_dir, components_dir, routes, ic, title, layout, output_dir, tailwind, dark_mode, false)
+        new(routes_dir, components_dir, routes, ic, title, layout, output_dir, tailwind, dark_mode, rstrip(base_path, '/'), false)
     end
 end
 
@@ -293,9 +295,10 @@ function compile_interactive_components(app::App)::Vector{CompiledInteractive}
         # Generate unique wasm filename
         wasm_filename = "$(lowercase(ic.name)).wasm"
 
-        # Adjust hydration JS to use absolute path from site root
-        # This ensures it works from any subdirectory (e.g., /getting-started/)
-        js = replace(result.hydration.js, "./app.wasm" => "/$wasm_filename")
+        # Adjust hydration JS to use absolute path with base_path
+        # This ensures it works from any subdirectory and on GitHub Pages subpaths
+        wasm_path = isempty(app.base_path) ? "/$wasm_filename" : "$(app.base_path)/$wasm_filename"
+        js = replace(result.hydration.js, "./app.wasm" => wasm_path)
 
         push!(compiled, CompiledInteractive(
             ic,
@@ -347,13 +350,16 @@ function generate_page(
     end
 
     # Build HTML document
+    # Add base tag for GitHub Pages subpath deployment
+    base_tag = isempty(app.base_path) ? "" : "\n    <base href=\"$(app.base_path)/\">"
+
     html = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$(page_title)</title>
+    <title>$(page_title)</title>$(base_tag)
 """
 
     if app.tailwind
