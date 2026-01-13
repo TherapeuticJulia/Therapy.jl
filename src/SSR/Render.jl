@@ -19,14 +19,20 @@ const BOOLEAN_ATTRIBUTES = Set([
 ])
 
 """
+Tags where content should NOT be HTML escaped (raw text elements).
+"""
+const RAW_TEXT_ELEMENTS = Set([:script, :style])
+
+"""
 SSR context for tracking hydration keys and state.
 """
 mutable struct SSRContext
     hydration_key::Int
     signals::Dict{Int, Any}  # Signal ID -> current value (for hydration)
+    in_raw_text_element::Bool  # True when inside script/style tags
 end
 
-SSRContext() = SSRContext(0, Dict{Int, Any}())
+SSRContext() = SSRContext(0, Dict{Int, Any}(), false)
 
 """
 Generate next hydration key.
@@ -79,9 +85,11 @@ function render_html!(io::IO, node::VNode, ctx::SSRContext)
     # Open tag
     print(io, "<", tag)
 
-    # Add hydration key
-    hk = next_hydration_key!(ctx)
-    print(io, " data-hk=\"", hk, "\"")
+    # Add hydration key (skip for script/style - no hydration needed)
+    if node.tag ∉ RAW_TEXT_ELEMENTS
+        hk = next_hydration_key!(ctx)
+        print(io, " data-hk=\"", hk, "\"")
+    end
 
     # Render props
     render_props!(io, node.props, ctx)
@@ -92,10 +100,19 @@ function render_html!(io::IO, node::VNode, ctx::SSRContext)
     else
         print(io, ">")
 
+        # Track if we're inside a raw text element (script/style)
+        was_in_raw = ctx.in_raw_text_element
+        if node.tag in RAW_TEXT_ELEMENTS
+            ctx.in_raw_text_element = true
+        end
+
         # Render children
         for child in node.children
             render_html!(io, child, ctx)
         end
+
+        # Restore raw text state
+        ctx.in_raw_text_element = was_in_raw
 
         # Close tag
         print(io, "</", tag, ">")
@@ -150,8 +167,13 @@ function render_html!(io::IO, node::IslandDef, ctx::SSRContext)
 end
 
 function render_html!(io::IO, node::AbstractString, ctx::SSRContext)
-    # Escape HTML entities
-    print(io, escape_html(node))
+    # Don't escape content inside script/style tags (raw text elements)
+    if ctx.in_raw_text_element
+        print(io, node)
+    else
+        # Escape HTML entities
+        print(io, escape_html(node))
+    end
 end
 
 function render_html!(io::IO, node::RawHtml, ctx::SSRContext)
