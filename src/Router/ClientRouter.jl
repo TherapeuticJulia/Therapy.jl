@@ -29,10 +29,8 @@ function client_router_script(; content_selector::String="#page-content", base_p
         contentSelector: '$(content_selector)',
         basePath: '$(base_path)',
         partialHeader: 'X-Therapy-Partial',
-        debug: true
+        debug: false
     };
-
-    console.log('[Router] Script loaded, initializing...');
 
     // Track current navigation to cancel on rapid clicks
     let currentNavigation = null;
@@ -100,7 +98,6 @@ function client_router_script(; content_selector::String="#page-content", base_p
         const baseEl = document.querySelector('base[href]');
         const basePath = baseEl ? baseEl.getAttribute('href') : '/';
         const resolved = new URL(href, window.location.origin + basePath).pathname;
-        console.log('[Router] Resolved', href, 'against base', basePath, '->', resolved);
         return resolved;
     }
 
@@ -136,10 +133,7 @@ function client_router_script(; content_selector::String="#page-content", base_p
      * Fetch page content and swap it into the content container
      */
     async function loadPage(path) {
-        console.log('[Router] loadPage called with path:', path);
-
         const container = document.querySelector(CONFIG.contentSelector);
-        console.log('[Router] Container found:', !!container, container?.tagName);
         if (!container) {
             console.error('[Router] Content container not found:', CONFIG.contentSelector);
             window.location.href = path;
@@ -161,7 +155,6 @@ function client_router_script(; content_selector::String="#page-content", base_p
         container.style.transition = 'opacity 0.1s';
 
         try {
-            console.log('[Router] Fetching:', path);
             const response = await fetch(path, {
                 headers: {
                     [CONFIG.partialHeader]: '1',
@@ -171,13 +164,11 @@ function client_router_script(; content_selector::String="#page-content", base_p
                 signal: abortController.signal
             });
 
-            console.log('[Router] Fetch response:', response.status, response.ok);
             if (!response.ok) {
                 throw new Error('HTTP ' + response.status);
             }
 
             let html = await response.text();
-            console.log('[Router] Got HTML, length:', html.length);
 
             // Check if this navigation was cancelled while waiting for response
             if (abortController.signal.aborted) {
@@ -295,25 +286,14 @@ function client_router_script(; content_selector::String="#page-content", base_p
      * Handle click events on links
      */
     function handleLinkClick(event) {
-        console.log('[Router] Click detected on:', event.target.tagName);
-
         // Find the closest anchor tag
         const link = event.target.closest('a[href]');
-        if (!link) {
-            console.log('[Router] No link found');
-            return;
-        }
+        if (!link) return;
 
         const href = link.getAttribute('href');
-        console.log('[Router] Link href:', href);
 
         // Check if we should handle this link
-        if (!isInternalLink(href, link)) {
-            console.log('[Router] Not internal link, skipping');
-            return;
-        }
-
-        console.log('[Router] Intercepting navigation to:', href);
+        if (!isInternalLink(href, link)) return;
 
         // Prevent default navigation
         event.preventDefault();
@@ -337,17 +317,8 @@ function client_router_script(; content_selector::String="#page-content", base_p
     function init() {
         log('Initializing client-side router');
 
-        // Bind link click handler (delegation on document)
-        document.addEventListener('click', handleLinkClick, true);  // Use capture phase
-        console.log('[Router] Click listener bound to document (capture phase)');
-
-        // Test that click handler is a function
-        console.log('[Router] handleLinkClick is:', typeof handleLinkClick);
-
-        // Also bind a simple test listener to verify events work
-        document.addEventListener('click', function(e) {
-            console.log('[Router] RAW CLICK on:', e.target.tagName, e.target.className?.substring(0, 50));
-        }, true);
+        // Bind link click handler (delegation on document, capture phase)
+        document.addEventListener('click', handleLinkClick, true);
 
         // Bind popstate for back/forward
         window.addEventListener('popstate', handlePopState);
