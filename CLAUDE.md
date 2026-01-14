@@ -591,335 +591,190 @@ This design means Therapy.jl never touches Wasm opcodes for business logic - it 
 
 ## Leptos Feature Parity Analysis
 
-Therapy.jl aims for feature parity with Leptos.rs. Current status:
+Therapy.jl aims for feature parity with Leptos.rs. Current status as of January 2026:
 
-### Implemented (Core Complete)
+### ✅ Complete - Core Reactivity
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Signals (getter/setter) | ✅ Done | `create_signal()` |
-| Effects | ✅ Done | `create_effect()` |
-| Memos | ✅ Done | `create_memo()` |
-| Batching | ✅ Done | `batch()` |
-| Components | ✅ Done | `component()` |
-| Props with defaults | ✅ Done | `get_prop()` |
-| Children slot | ✅ Done | `get_children()` |
-| Show conditional | ✅ Done | `Show()` |
-| For list rendering | ✅ Done | `For()` |
-| SSR | ✅ Done | `render_to_string()` |
-| Hydration keys | ✅ Done | `data-hk` attributes |
-| Islands architecture | ✅ Done | `island()` |
-| File-based routing | ✅ Done | `[id].jl`, `[...slug].jl` |
-| Wasm compilation | ✅ Done | Via WasmTarget.jl |
-| Two-way input binding | ✅ Done | Auto-generated handlers |
-| Theme binding | ✅ Done | Dark mode toggle |
+| Feature | Leptos | Therapy.jl | Notes |
+|---------|--------|------------|-------|
+| Signals (getter/setter) | `signal()` | `create_signal()` | ✅ Identical API |
+| Effects | `Effect` | `create_effect()` | ✅ Auto-tracking |
+| Memos | `Memo` | `create_memo()` | ✅ Cached computed |
+| Batching | `batch()` | `batch()` | ✅ Deferred updates |
 
-### Gaps (Roadmap)
+### ✅ Complete - Components & View
+
+| Feature | Leptos | Therapy.jl | Notes |
+|---------|--------|------------|-------|
+| Components | `#[component]` | `component()` | ✅ Reusable |
+| Props with defaults | `#[prop]` | `get_prop()` | ✅ Type-safe |
+| Children slot | `children` | `get_children()` | ✅ Slot pattern |
+| Show conditional | `<Show>` | `Show()` | ✅ Reactive visibility |
+| For list rendering | `<For>` | `For()` | ✅ Keyed iteration |
+| Lifecycle hooks | `on_mount`, `on_cleanup` | `on_mount`, `on_cleanup` | ✅ Mount/cleanup |
+
+### ✅ Complete - SSR & Hydration
+
+| Feature | Leptos | Therapy.jl | Notes |
+|---------|--------|------------|-------|
+| Server-side rendering | `ssr` feature | `render_to_string()` | ✅ Full HTML |
+| Hydration keys | `data-hk` | `data-hk` | ✅ Same approach |
+| Islands architecture | `#[island]` | `island()` | ✅ Opt-in interactivity |
+| Wasm compilation | trunk/wasm-pack | WasmTarget.jl | ✅ Direct IR→Wasm |
+
+### ✅ Complete - Routing
+
+| Feature | Leptos | Therapy.jl | Notes |
+|---------|--------|------------|-------|
+| File-based routing | leptos_router | `create_router()` | ✅ `[id].jl`, `[...slug].jl` |
+| Client-side navigation | `<A>` component | `NavLink()` + `TherapyRouter` | ✅ SPA with hydration |
+| Active link styling | `active_class` | `active_class` | ✅ Prefix/exact matching |
+| History API | Built-in | `ClientRouter.jl` | ✅ pushState/popState |
+
+### ✅ Complete - WebSocket & Real-Time
+
+| Feature | Leptos | Therapy.jl | Notes |
+|---------|--------|------------|-------|
+| WebSocket connection | `provide_websocket()` | `websocket_client_script()` | ✅ Auto-connect |
+| Server signals | `leptos_server_signal` | `create_server_signal()` | ✅ Read-only client |
+| Bidirectional signals | `leptos_ws` | `create_bidirectional_signal()` | ✅ Collaborative |
+| Channel signals | `ChannelSignal` | `create_channel()` | ✅ Discrete messages |
+| JSON patches | RFC 6902 | `JSONPatch.jl` | ✅ Efficient sync |
+| Auto-reconnect | Manual | ✅ Exponential backoff | **Ahead of Leptos** |
+| Auto-discover bindings | Manual JS | `data-server-signal` attr | **Ahead of Leptos** |
+| Static hosting fallback | ❌ | ✅ Warning UI | **Ahead of Leptos** |
+
+### ⚠️ Partial - Forms & Input
+
+| Feature | Leptos | Therapy.jl | Notes |
+|---------|--------|------------|-------|
+| Two-way input binding | Built-in | ✅ Auto-generated handlers | Works for number inputs |
+| ActionForm | `<ActionForm>` | ❌ | Progressive enhancement |
+| Form validation | Via actions | ❌ | Client-side validation |
+
+### ❌ Missing - Async & Data (Priority 1)
 
 | Feature | Leptos | Therapy.jl | Priority |
 |---------|--------|------------|----------|
-| **Async & Data** | | | |
-| Resource (async data) | ✅ | ❌ | **P1** |
-| Suspense boundaries | ✅ | ❌ | **P1** |
-| Transition | ✅ | ❌ | P2 |
-| **Server Integration** | | | |
-| Server functions (@server RPC) | ✅ | ❌ | **P1** |
-| ActionForm (progressive) | ✅ | ❌ | P2 |
-| Serialization server↔client | ✅ | ❌ | **P1** |
-| **WebSocket & Real-Time** | | | |
-| WebSocket connection | ✅ `provide_websocket()` | ✅ `websocket_client_script()` | Done |
-| Server signals (read-only client) | ✅ `leptos_server_signal` | ✅ `create_server_signal()` | Done |
-| Auto-reconnect | ✅ | ✅ Exponential backoff | Done |
-| Auto-discover DOM bindings | ❌ Manual | ✅ `data-server-signal` attr | **Ahead!** |
-| Static hosting graceful degradation | ❌ | ✅ Warning UI | **Ahead!** |
-| JSON patch sync | ✅ | ✅ RFC 6902 | Done |
-| Bidirectional signals | ✅ `leptos_ws` | ✅ `create_bidirectional_signal()` | Done |
-| Channel signals (messaging) | ✅ `ChannelSignal` | ✅ `create_channel()` | Done |
-| Server function streaming | ⚠️ PR #3656 | ❌ | P3 |
-| **Router** | | | |
-| Client-side navigation | ✅ | ✅ | Done |
-| Nested routes + Outlet | ✅ | ❌ | P2 |
-| use_params() / use_query() | ✅ | ❌ | **P1** |
-| **Context** | | | |
-| provide_context/use_context | ✅ | ❌ | **P1** |
-| **View** | | | |
-| Dynamic classes/styles | ✅ | ⚠️ Partial | P2 |
-| ErrorBoundary | ✅ | ❌ | P2 |
-| Portal | ✅ | ❌ | P3 |
-| **SSR Advanced** | | | |
-| Streaming SSR | ✅ | ❌ | P2 |
-| Out-of-order streaming | ✅ | ❌ | P3 |
-| **Optimization** | | | |
-| Code splitting (@lazy) | ✅ | ❌ | P3 |
+| Resource | `Resource` | ❌ | **P1** - Async data loading |
+| Suspense | `<Suspense>` | ❌ | **P1** - Loading boundaries |
+| Transition | `<Transition>` | ❌ | P2 - Stale content |
+| Action | `Action` | ❌ | P2 - Mutations |
+
+### ❌ Missing - Server Functions (Priority 1)
+
+| Feature | Leptos | Therapy.jl | Priority |
+|---------|--------|------------|----------|
+| Server functions | `#[server]` | ❌ | **P1** - RPC to server |
+| Extractors | `extract()` | ❌ | P2 - Request data |
+| Server responses | `Redirect`, `ErrorResponse` | ❌ | P2 - Response types |
+
+### ❌ Missing - Context (Priority 1)
+
+| Feature | Leptos | Therapy.jl | Priority |
+|---------|--------|------------|----------|
+| provide_context | `provide_context()` | ❌ | **P1** |
+| use_context | `use_context()` | ❌ | **P1** |
+
+### ❌ Missing - Advanced Routing (Priority 2)
+
+| Feature | Leptos | Therapy.jl | Priority |
+|---------|--------|------------|----------|
+| Nested routes | `<Route><Route>` | ❌ | P2 |
+| Outlet | `<Outlet>` | ❌ | P2 |
+| use_params() | `use_params()` | ❌ | P2 - Reactive params |
+| use_query() | `use_query()` | ❌ | P2 - Reactive query |
+
+### ❌ Missing - Error Handling (Priority 2)
+
+| Feature | Leptos | Therapy.jl | Priority |
+|---------|--------|------------|----------|
+| ErrorBoundary | `<ErrorBoundary>` | ❌ | P2 |
+| Error recovery | `<ErrorBoundary fallback>` | ❌ | P2 |
+
+### ❌ Missing - Advanced SSR (Priority 3)
+
+| Feature | Leptos | Therapy.jl | Priority |
+|---------|--------|------------|----------|
+| Streaming SSR | HTTP streaming | ❌ | P3 |
+| Out-of-order streaming | `<Suspense>` streaming | ❌ | P3 |
+| Partial hydration | Islands subset | ❌ | P3 |
+
+### ❌ Missing - Optimization (Priority 3)
+
+| Feature | Leptos | Therapy.jl | Priority |
+|---------|--------|------------|----------|
+| Code splitting | `#[lazy]` | ❌ | P3 |
+| Dynamic styles | Reactive `class:` | ⚠️ Partial | P3 |
+| Portal/Teleport | `<Portal>` | ❌ | P3 |
 
 ---
 
-## Leptos WebSocket Architecture (Parity Target)
+## Parity Summary
 
-Leptos has **three layers** of WebSocket support that we need to match:
+**Overall: ~70% Leptos parity**
 
-### 1. leptos_server_signal (Server → Client)
+| Category | Status | Completion |
+|----------|--------|------------|
+| Core Reactivity | ✅ Complete | 100% |
+| Components & View | ✅ Complete | 100% |
+| SSR & Hydration | ✅ Complete | 100% |
+| Routing (basic) | ✅ Complete | 80% |
+| WebSocket/Real-Time | ✅ Complete | 100% (ahead in some areas) |
+| Async/Data | ❌ Missing | 0% |
+| Server Functions | ❌ Missing | 0% |
+| Context | ❌ Missing | 0% |
+| Error Handling | ❌ Missing | 0% |
+| Advanced SSR | ❌ Missing | 0% |
 
-Server-controlled signals that are **read-only on the client**. Changes sent as **JSON patches** (efficient diffs).
-
-**Use cases:** Real-time dashboards, live data feeds, notifications, multiplayer game state
-
-```rust
-// Leptos (Rust)
-// Server side
-let signal = ServerSignal::new(initial_value);
-signal.with(|s| *s = new_value); // Broadcasts to all clients
-
-// Client side (read-only)
-let value = create_server_signal::<MyType>();
-```
-
-**Therapy.jl equivalent needed:**
-```julia
-# Server side
-count = create_server_signal(0)
-set_server_signal!(count, 5)  # Broadcasts via WebSocket
-
-# Client side (read-only, auto-synced)
-# Signal updates automatically when server pushes
-```
-
-### 2. leptos_ws (Bidirectional)
-
-Three signal types for different communication patterns:
-
-| Type | Direction | Use Case |
-|------|-----------|----------|
-| `ReadOnlySignal` | Server → Client | Live data, notifications |
-| `BiDirectionalSignal` | Server ↔ Client | Collaborative editing, shared state |
-| `ChannelSignal` | Messages both ways | Chat, discrete events |
-
-**Key feature:** All use JSON patches for efficient sync (only send diffs, not full state).
-
-### 3. Server Function WebSocket Transport (PR #3656)
-
-Extends `#[server]` functions to work over WebSocket with **streaming** support:
-- Accept streams of items from client
-- Emit streams of items to client
-- Same API as HTTP server functions, different transport
-
----
-
-## WebSocket Implementation Plan for Therapy.jl
-
-### Phase 2.5: WebSocket Infrastructure (NEW - High Priority)
-
-**Goal:** Real-time server-client communication matching Leptos capabilities
-
-#### Step 1: WebSocket Connection Layer
-
-```julia
-# Server-side: WebSocket endpoint using HTTP.jl
-function ws_endpoint(ws::HTTP.WebSocket)
-    # Register connection
-    connection_id = register_ws_connection(ws)
-
-    try
-        while !eof(ws)
-            msg = String(readavailable(ws))
-            handle_ws_message(connection_id, JSON.parse(msg))
-        end
-    finally
-        unregister_ws_connection(connection_id)
-    end
-end
-
-# Client-side (in hydration JS):
-function provide_websocket(url) {
-    const ws = new WebSocket(url);
-    ws.onmessage = (e) => handleServerMessage(JSON.parse(e.data));
-    // Auto-reconnect logic
-    return ws;
-}
-```
-
-**Files:** `src/Server/WebSocket.jl`, `src/Compiler/Hydration.jl`
-
-#### Step 2: Server Signals (Read-Only Client)
-
-```julia
-# Create a server-controlled signal
-visitors = create_server_signal(Int32(0))
-
-# Server can update - broadcasts to all connected clients
-function on_new_visitor()
-    update_server_signal!(visitors, visitors[] + 1)
-end
-
-# In component (client reads, can't write)
-Div("Current visitors: ", visitors)
-```
-
-**Implementation:**
-- Server maintains signal registry with current values
-- On update, compute JSON patch and broadcast to all connections
-- Client hydration JS receives patches and updates local signal copy
-- Wasm globals updated via `set_signal_X()` exports
-
-**Files:** `src/Reactivity/ServerSignal.jl`, `src/Server/SignalBroadcast.jl`
-
-#### Step 3: Bidirectional Signals
-
-```julia
-# Shared state - both server and client can modify
-shared_doc = create_shared_signal(DocumentState())
-
-# Client modification (via Wasm handler)
-:on_input => (text) -> update_shared!(shared_doc, text)
-
-# Server modification (e.g., from another client or server logic)
-update_shared!(shared_doc, validated_text)
-```
-
-**Implementation:**
-- Client changes send patches to server via WebSocket
-- Server validates, applies, and rebroadcasts to other clients
-- Conflict resolution: last-write-wins or custom merge function
-- Optimistic updates on client (rollback if server rejects)
-
-**Files:** `src/Reactivity/SharedSignal.jl`
-
-#### Step 4: Channel Signals (Messaging)
-
-```julia
-# Create a typed message channel
-chat = create_channel(ChatMessage)
-
-# Send from client (in Wasm handler)
-:on_click => () -> send!(chat, ChatMessage(user_id, text()))
-
-# Receive on client (reactive)
-For(messages(chat)) do msg
-    ChatBubble(msg)
-end
-
-# Server can also send
-broadcast!(chat, SystemMessage("User joined"))
-```
-
-**Files:** `src/Reactivity/Channel.jl`
-
-#### Step 5: JSON Patch Protocol
-
-Efficient sync using RFC 6902 JSON Patches:
-
-```julia
-# Instead of sending full state:
-# { "users": [...100 users...] }
-
-# Send only the diff:
-# [{"op": "add", "path": "/users/-", "value": {"name": "New User"}}]
-
-using JSONPatch  # Or implement minimal version
-
-function compute_patch(old_state, new_state)
-    # Returns array of patch operations
-end
-
-function apply_patch(state, patch)
-    # Applies patch operations to state
-end
-```
-
-**Files:** `src/Server/JSONPatch.jl`
-
-### WebSocket Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Server (Julia)                        │
-├─────────────────────────────────────────────────────────────┤
-│  SignalRegistry          ChannelRegistry                     │
-│  ┌──────────────┐       ┌──────────────┐                    │
-│  │ visitors: 42 │       │ chat: [...]  │                    │
-│  │ doc: {...}   │       │ events: [...]│                    │
-│  └──────────────┘       └──────────────┘                    │
-│         │                      │                             │
-│         ▼                      ▼                             │
-│  ┌─────────────────────────────────────┐                    │
-│  │     WebSocket Connection Manager     │                    │
-│  │  - Connection registry               │                    │
-│  │  - JSON patch computation            │                    │
-│  │  - Broadcast to subscribers          │                    │
-│  └─────────────────────────────────────┘                    │
-│                    │                                         │
-└────────────────────┼─────────────────────────────────────────┘
-                     │ WebSocket (JSON patches)
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Client (Browser)                        │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────┐                    │
-│  │         Hydration JS Layer           │                    │
-│  │  - WebSocket connection              │                    │
-│  │  - Patch application                 │                    │
-│  │  - Signal sync to Wasm               │                    │
-│  └─────────────────────────────────────┘                    │
-│                    │                                         │
-│                    ▼                                         │
-│  ┌─────────────────────────────────────┐                    │
-│  │           Wasm Module                │                    │
-│  │  ┌─────────────┐ ┌─────────────┐    │                    │
-│  │  │ signal_0: 42│ │ handlers    │    │                    │
-│  │  │ signal_1:...│ │ (compiled)  │    │                    │
-│  │  └─────────────┘ └─────────────┘    │                    │
-│  └─────────────────────────────────────┘                    │
-│                    │                                         │
-│                    ▼                                         │
-│              DOM Updates                                     │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Priority Order
-
-1. **WebSocket connection + auto-reconnect** - Foundation
-2. **Server signals (read-only)** - Most common use case
-3. **JSON patch protocol** - Efficiency for all signal types
-4. **Bidirectional signals** - Collaborative features
-5. **Channel signals** - Messaging patterns
-6. **Server function streaming** - Advanced use cases
+**Next priorities to reach 90% parity:**
+1. Resource + Suspense (async data)
+2. Server functions (@server macro)
+3. Context API (provide_context/use_context)
+4. use_params()/use_query() reactive hooks
 
 ---
 
 ## Implementation Roadmap
 
-### Phase 1: Context & Reactivity Completion
+### Phase 1: Context API (Priority 1)
 
-**Goal:** Complete reactive foundation
+**Goal:** Enable component tree data sharing
 
-1. **Context API**
-   - `provide_context(key, value)` - Provide value to descendants
-   - `use_context(key)` - Access context value
-   - Thread context through component tree
-   - Files: `src/Reactivity/Context.jl`, `src/Components/Component.jl`
+```julia
+# Provider component
+function App()
+    provide_context(:theme, create_signal("light"))
+    provide_context(:user, current_user)
 
-2. **Trigger Primitive**
-   - Signalless reactivity for pure notification
-   - Files: `src/Reactivity/Trigger.jl`
+    Div(Header(), MainContent(), Footer())
+end
 
-3. **WasmTarget Control Flow Fixes**
-   - Fix nested conditionals in void handlers
-   - Enable full TicTacToe winner detection
+# Consumer component (any depth)
+function ThemeToggle()
+    theme, set_theme = use_context(:theme)
+    Button(:on_click => () -> set_theme(theme() == "light" ? "dark" : "light"))
+end
+```
 
-### Phase 2: Async & Data Fetching
+**Files:** `src/Reactivity/Context.jl`
+
+### Phase 2: Async & Data Fetching (Priority 1)
 
 **Goal:** Enable async data loading patterns
 
 1. **Resource Type**
    ```julia
    user = create_resource(
-       () -> user_id(),           # Source signal
+       () -> user_id(),           # Source signal (reactive dependency)
        (id) -> fetch_user(id)     # Async fetcher
    )
+
+   # Access states
+   user.loading    # true while fetching
+   user.error      # error if failed
+   user()          # data when ready
    ```
-   - States: loading, error, data
-   - Reactive dependency tracking
-   - Files: `src/Reactivity/Resource.jl`
 
 2. **Suspense Component**
    ```julia
@@ -928,126 +783,99 @@ end
        children = () -> UserProfile(user = user())
    )
    ```
-   - Renders fallback while resources loading
-   - Files: `src/Components/Suspense.jl`
 
-3. **Transition Component**
-   - Keep current content visible during loading
-   - Files: `src/Components/Transition.jl`
-
-### Phase 3: Server Functions
-
-**Goal:** Seamless server-client communication
-
-1. **@server Macro**
+3. **Await Component** (simpler alternative)
    ```julia
-   @server function get_user(id::Int)::User
-       DB.query("SELECT * FROM users WHERE id = ?", id)
+   Await(user_resource) do user
+       UserCard(user)
    end
    ```
-   - Server-side: Function registration and execution
-   - Client-side: HTTP stub generation
-   - Files: `src/Server/ServerFunctions.jl`
 
-2. **Serialization Protocol**
-   - JSON or MessagePack
-   - Type-safe serialization/deserialization
-   - Files: `src/Server/Serialization.jl`
+**Files:** `src/Reactivity/Resource.jl`, `src/Components/Suspense.jl`
 
-3. **ActionForm Component**
+### Phase 3: Server Functions (Priority 1)
+
+**Goal:** Seamless server-client RPC
+
+```julia
+@server function get_user(id::Int)::User
+    DB.query("SELECT * FROM users WHERE id = ?", id)
+end
+
+@server function create_post(title::String, body::String)::Post
+    DB.insert("posts", title=title, body=body)
+end
+
+# Client calls same function - auto-generates HTTP request
+user = create_resource(() -> get_user(user_id()))
+```
+
+**Implementation:**
+- `@server` macro registers function and generates client stub
+- Client stub makes POST to `/_server/function_name`
+- Server routes to registered function
+- JSON serialization for arguments and return value
+
+**Files:** `src/Server/ServerFunctions.jl`, `src/Server/Serialization.jl`
+
+### Phase 4: Advanced Routing (Priority 2)
+
+**Goal:** Reactive route access and nested layouts
+
+1. **Reactive Route Hooks**
    ```julia
-   ActionForm(
-       action = create_user,
-       children = () -> [Input(:name => "email"), Button("Submit")]
+   function UserProfile()
+       params = use_params()  # Reactive - reruns when route changes
+       query = use_query()
+
+       user = create_resource(() -> fetch_user(params[:id]))
+
+       Div("User: ", user().name)
+   end
+   ```
+
+2. **Nested Routes & Outlet**
+   ```julia
+   # In router config
+   Route("/users", UsersLayout,
+       Route("/", UsersList),
+       Route("/:id", UserDetail),
+       Route("/:id/posts", UserPosts)
    )
+
+   # UsersLayout.jl
+   function UsersLayout()
+       Div(:class => "users-container",
+           Sidebar(),
+           Outlet()  # Child route renders here
+       )
+   end
    ```
-   - Works without JS (progressive enhancement)
-   - Files: `src/Components/ActionForm.jl`
 
-### Phase 4: Client-Side Router ✅ COMPLETE
+**Files:** `src/Router/Hooks.jl`, `src/Router/Outlet.jl`
 
-**Goal:** SPA-style navigation without full page reloads
+### Phase 5: Error Handling (Priority 2)
 
-1. **History API Integration** ✅
-   - Intercept link clicks (all internal `<a>` tags)
-   - Push/pop state handling (back/forward buttons)
-   - Partial page fetching with `X-Therapy-Partial: 1` header
-   - Layout persists, only `#page-content` swaps
-   - Files: `src/Router/ClientRouter.jl`
+**Goal:** Graceful error recovery
 
-2. **NavLink Component** ✅
-   ```julia
-   NavLink("getting-started/", "Getting Started";
-       class = "nav-link",
-       active_class = "text-emerald-700"
-   )
-   ```
-   - Client-side navigation with active state
-   - `data-navlink` attribute for router detection
-   - `data-exact` for exact path matching
-   - Files: `src/Router/Router.jl`
+```julia
+ErrorBoundary(
+    fallback = (err, reset) -> Div(
+        P("Something went wrong: ", err.message),
+        Button(:on_click => reset, "Try again")
+    ),
+    children = () -> RiskyComponent()
+)
+```
 
-3. **App-Level Layout** ✅
-   ```julia
-   app = App(
-       routes_dir = "src/routes",
-       layout = :Layout  # Symbol for deferred resolution
-   )
-   ```
-   - Layout applied at app level (not per-route)
-   - Routes return just content, not wrapped in Layout
-   - Enables true SPA with persistent nav/footer
+**Files:** `src/Components/ErrorBoundary.jl`
 
-4. **Reactive Route Primitives** (TODO)
-   ```julia
-   params = use_params()      # Reactive route params
-   query = use_query()        # Reactive query string
-   ```
-   - Files: `src/Router/Hooks.jl`
+### Phase 6: Production Features (Priority 3)
 
-5. **Nested Routes & Outlet** (TODO)
-   ```julia
-   Route("/users", UserLayout,
-       Route("/:id", UserDetail)
-   )
-   # UserLayout contains <Outlet/> for child routes
-   ```
-   - Files: `src/Router/Outlet.jl`
-
-### Phase 5: Production Readiness
-
-**Goal:** Production-grade features
-
-1. **Streaming SSR**
-   - Yield HTML chunks as data resolves
-   - Placeholder markers for Suspense
-   - Inline scripts for content swapping
-   - Files: `src/SSR/Streaming.jl`
-
-2. **Error Boundaries**
-   ```julia
-   ErrorBoundary(
-       fallback = (err) -> P("Error: ", err.message),
-       children = () -> RiskyComponent()
-   )
-   ```
-   - Files: `src/Components/ErrorBoundary.jl`
-
-3. **Code Splitting**
-   ```julia
-   @lazy InteractiveChart  # Load only when needed
-   ```
-   - Files: `src/Compiler/CodeSplitting.jl`
-
-4. **Dynamic Classes & Styles**
-   ```julia
-   Div(
-       :class => () -> count() > 5 ? "text-red-500" : "text-green-500",
-       :style => () -> Dict("transform" => "rotate($(angle())deg)")
-   )
-   ```
-   - Compile reactive class/style to Wasm
-   - Files: `src/Compiler/DynamicStyles.jl`
+1. **Streaming SSR** - Progressive HTML delivery
+2. **Code Splitting** - `@lazy` for on-demand loading
+3. **Dynamic Styles** - Reactive `class:` and `style:` bindings
+4. **Transitions** - Keep stale content during loading
 
 ---
 
