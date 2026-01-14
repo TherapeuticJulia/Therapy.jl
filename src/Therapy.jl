@@ -29,6 +29,11 @@ include("Styles/Tailwind.jl")
 
 # Server
 include("Server/DevServer.jl")
+include("Server/WebSocket.jl")
+include("Server/WebSocketClient.jl")
+
+# Server Signals (depends on Server/WebSocket.jl)
+include("Reactivity/ServerSignal.jl")
 
 # Compiler
 include("Compiler/Compile.jl")
@@ -77,6 +82,18 @@ export tailwind_cdn, tailwind_config
 
 # Exports - Server
 export serve, serve_static
+
+# Exports - WebSocket
+export handle_websocket, websocket_client_script
+export on_ws_connect, on_ws_disconnect
+export broadcast_signal_update, broadcast_all
+export ws_connection_count, ws_connection_ids
+export WSConnection, WS_CONNECTIONS
+
+# Exports - Server Signals
+export ServerSignal, create_server_signal
+export set_server_signal!, get_server_signal, update_server_signal!
+export get_server_signal_by_name, list_server_signals, delete_server_signal!
 
 # Exports - Compiler
 export compile_component, compile_and_serve, compile_multi

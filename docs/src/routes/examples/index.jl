@@ -42,6 +42,12 @@ function ExamplesIndex()
                     true
                 ),
                 ExampleCard(
+                    "WebSocket",
+                    "Real-time server signals with live visitor counter.",
+                    "examples/websocket/",
+                    true
+                ),
+                ExampleCard(
                     "Todo List",
                     "A full-featured todo application with add, complete, and delete.",
                     "#",

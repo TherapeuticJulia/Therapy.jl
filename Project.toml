@@ -5,18 +5,21 @@ version = "0.1.0"
 
 [deps]
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 WasmTarget = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 [sources]
 WasmTarget = {path = "../WasmTarget.jl"}
+
+[compat]
+HTTP = "1"
+JSON3 = "1.14.3"
+julia = "1.11, 1.12"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
-
-[compat]
-HTTP = "1"
-julia = "1.11, 1.12"

@@ -51,6 +51,27 @@ app = App(
 )
 
 # =============================================================================
+# WebSocket Server Signals
+# =============================================================================
+
+# Create a server signal for live visitor count
+# This broadcasts to all connected WebSocket clients when updated
+visitors = create_server_signal("visitors", 0)
+
+# Track connections with lifecycle hooks
+on_ws_connect() do conn
+    # Increment visitor count - automatically broadcasts to all clients
+    update_server_signal!(visitors, v -> v + 1)
+    println("[WS] Client connected: $(conn.id) ($(visitors[]) visitors)")
+end
+
+on_ws_disconnect() do conn
+    # Decrement on disconnect
+    update_server_signal!(visitors, v -> max(0, v - 1))
+    println("[WS] Client disconnected: $(conn.id) ($(visitors[]) visitors)")
+end
+
+# =============================================================================
 # Run - dev or build based on args
 # =============================================================================
 

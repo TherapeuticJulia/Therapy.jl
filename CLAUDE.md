@@ -33,7 +33,8 @@ Therapy.jl/
 │   │   ├── Context.jl          # Effect stack, batching mode, dependency tracking
 │   │   ├── Signal.jl           # create_signal, batch, handler tracing
 │   │   ├── Effect.jl           # create_effect, dispose!, dependency tracking
-│   │   └── Memo.jl             # create_memo with lazy evaluation
+│   │   ├── Memo.jl             # create_memo with lazy evaluation
+│   │   └── ServerSignal.jl     # Server-controlled signals (WebSocket broadcast)
 │   ├── DOM/
 │   │   ├── VNode.jl            # VNode, Fragment, Show, For conditionals
 │   │   ├── Elements.jl         # All HTML element factory functions
@@ -56,7 +57,9 @@ Therapy.jl/
 │   │   ├── Hydration.jl        # JavaScript hydration code generation
 │   │   └── Compile.jl          # compile_component main API
 │   ├── Server/
-│   │   └── DevServer.jl        # Development HTTP server
+│   │   ├── DevServer.jl        # Development HTTP server
+│   │   ├── WebSocket.jl        # WebSocket connection handling
+│   │   └── WebSocketClient.jl  # Client-side JS generation
 │   ├── App/
 │   │   └── App.jl              # High-level app framework
 │   └── SSG/
@@ -259,6 +262,66 @@ window.TherapyRouter.hydrateIslands();
 // Update active link styling
 window.TherapyRouter.updateActiveLinks();
 ```
+
+### WebSocket & Server Signals
+
+Server signals enable real-time updates from server to all connected clients:
+
+```julia
+# Server-side: Create a server signal
+visitors = create_server_signal("visitors", 0)
+
+# Update it - automatically broadcasts to all subscribed clients
+set_server_signal!(visitors, 42)
+# or with a function
+update_server_signal!(visitors, v -> v + 1)
+
+# Lifecycle hooks
+on_ws_connect() do conn
+    update_server_signal!(visitors, v -> v + 1)
+    println("Client connected: ", conn.id)
+end
+
+on_ws_disconnect() do conn
+    update_server_signal!(visitors, v -> v - 1)
+end
+```
+
+Client-side, use `data-server-signal` attribute for auto-binding:
+
+```julia
+# This element auto-updates when server broadcasts "visitors" signal
+Span(:data_server_signal => "visitors", "0")
+
+# Mark container for static hosting warning
+Div(:data_ws_example => "true",
+    Span(:data_server_signal => "visitors", "0")
+)
+```
+
+**JavaScript API:**
+```javascript
+// Check connection
+TherapyWS.isConnected()
+
+// Subscribe to additional signals
+TherapyWS.subscribe("chat_messages")
+
+// Re-scan DOM for new server signals (called automatically on SPA navigation)
+TherapyWS.discoverAndSubscribe()
+
+// Events
+window.addEventListener('therapy:ws:connected', () => { ... })
+window.addEventListener('therapy:signal:visitors', (e) => {
+    console.log('New value:', e.detail.value)
+})
+```
+
+**Features:**
+- Auto-reconnect with exponential backoff
+- Auto-discover `data-server-signal` elements on page load and SPA navigation
+- Graceful degradation: shows warning on static hosting (GitHub Pages)
+- wss:// on HTTPS, ws:// on HTTP
 
 ### Tailwind CSS
 
@@ -470,13 +533,15 @@ Therapy.jl aims for feature parity with Leptos.rs. Current status:
 | ActionForm (progressive) | ✅ | ❌ | P2 |
 | Serialization server↔client | ✅ | ❌ | **P1** |
 | **WebSocket & Real-Time** | | | |
-| WebSocket connection | ✅ `provide_websocket()` | ❌ | **P1** |
-| Server signals (read-only client) | ✅ `leptos_server_signal` | ❌ | **P1** |
+| WebSocket connection | ✅ `provide_websocket()` | ✅ `websocket_client_script()` | Done |
+| Server signals (read-only client) | ✅ `leptos_server_signal` | ✅ `create_server_signal()` | Done |
+| Auto-reconnect | ✅ | ✅ Exponential backoff | Done |
+| Auto-discover DOM bindings | ❌ Manual | ✅ `data-server-signal` attr | **Ahead!** |
+| Static hosting graceful degradation | ❌ | ✅ Warning UI | **Ahead!** |
 | Bidirectional signals | ✅ `leptos_ws` | ❌ | **P1** |
 | Channel signals (messaging) | ✅ `ChannelSignal` | ❌ | P2 |
-| JSON patch sync | ✅ | ❌ | **P1** |
-| Auto-reconnect | ✅ | ❌ | P2 |
-| Server function streaming | ⚠️ PR #3656 | ❌ | P2 |
+| JSON patch sync | ✅ | ❌ (sends full values) | P2 |
+| Server function streaming | ⚠️ PR #3656 | ❌ | P3 |
 | **Router** | | | |
 | Client-side navigation | ✅ | ✅ | Done |
 | Nested routes + Outlet | ✅ | ❌ | P2 |
@@ -916,17 +981,23 @@ end
 
 ### Therapy.jl Constraints
 
-1. **Server-Only Routing**
-   - Currently full page reloads for navigation
-   - Client router in roadmap (Phase 4)
-
-2. **No Async Data Handling**
+1. **No Async Data Handling**
    - No Resource/Suspense yet
    - Roadmap Phase 2
 
-3. **No Server Functions**
+2. **No Server Functions**
    - Manual fetch() calls required
    - Roadmap Phase 3
+
+3. **WebSocket: No JSON Patches**
+   - Currently sends full values, not diffs
+   - Less efficient for large objects
+   - Roadmap P2
+
+4. **WebSocket: No Bidirectional Signals**
+   - Server signals are read-only on client
+   - No collaborative editing support yet
+   - Roadmap P1
 
 ---
 

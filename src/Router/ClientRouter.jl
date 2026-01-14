@@ -204,6 +204,16 @@ function client_router_script(; content_selector::String="#page-content", base_p
             // Re-hydrate all islands in the new content
             await hydrateIslands();
 
+            // Re-run syntax highlighting for code blocks (Prism.js)
+            if (typeof Prism !== 'undefined' && Prism.highlightAll) {
+                Prism.highlightAll();
+            }
+
+            // Re-discover and subscribe to any new server signals in the content
+            if (typeof TherapyWS !== 'undefined' && TherapyWS.discoverAndSubscribe) {
+                TherapyWS.discoverAndSubscribe();
+            }
+
             log('Page loaded successfully');
 
         } catch (error) {

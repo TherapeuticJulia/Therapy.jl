@@ -556,6 +556,11 @@ $(all_js)
     router_js = render_to_string(client_router_script(content_selector="#page-content", base_path=app.base_path))
     html *= router_js
 
+    # Include WebSocket client script (for server signals)
+    # This enables real-time updates in dev mode and shows warnings on static hosting
+    ws_js = render_to_string(websocket_client_script())
+    html *= ws_js
+
     html *= """
 </body>
 </html>
@@ -644,12 +649,17 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
     println("Press Ctrl+C to stop\n")
 
     # Last check time for polling
-    last_check = time()
+    last_check = Ref(time())
     check_interval = 1.0  # Check every second
 
-    server = HTTP.serve!(host, actual_port) do request
+    # Stream-based handler for WebSocket support
+    function stream_handler(stream::HTTP.Stream)
+        request = stream.message
+        path = HTTP.URI(request.target).path
+        path = path == "" ? "/" : path
+
         # Check for file changes
-        if time() - last_check > check_interval
+        if time() - last_check[] > check_interval
             changed = check_for_changes()
             if !isempty(changed)
                 println("\n━━━ Files changed ━━━")
@@ -666,11 +676,18 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
                 end
                 println("━━━ Ready ━━━\n")
             end
-            last_check = time()
+            last_check[] = time()
         end
 
-        path = HTTP.URI(request.target).path
-        path = path == "" ? "/" : path
+        # Handle WebSocket upgrade requests
+        if path == "/ws"
+            is_upgrade = any(h -> lowercase(String(h.first)) == "upgrade" &&
+                                  lowercase(String(h.second)) == "websocket", request.headers)
+            if is_upgrade
+                handle_websocket(stream)
+                return
+            end
+        end
 
         # Check if this is a partial request (for client-side navigation)
         is_partial = any(h -> lowercase(String(h.first)) == "x-therapy-partial" && String(h.second) == "1", request.headers)
@@ -678,7 +695,11 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
         # Serve Wasm files
         for cc in compiled_components
             if path == "/$(cc.wasm_filename)"
-                return HTTP.Response(200, ["Content-Type" => "application/wasm"], cc.wasm_bytes)
+                HTTP.setstatus(stream, 200)
+                HTTP.setheader(stream, "Content-Type" => "application/wasm")
+                HTTP.startwrite(stream)
+                write(stream, cc.wasm_bytes)
+                return
             end
         end
 
@@ -691,16 +712,27 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
             if route_match
                 try
                     html = Base.invokelatest(generate_page, app, String(path), component_fn, compiled_components; partial=is_partial)
-                    return HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"], html)
+                    HTTP.setstatus(stream, 200)
+                    HTTP.setheader(stream, "Content-Type" => "text/html; charset=utf-8")
+                    HTTP.startwrite(stream)
+                    write(stream, html)
+                    return
                 catch e
                     @error "Error rendering page" exception=(e, catch_backtrace())
-                    return HTTP.Response(500, "Error: $e")
+                    HTTP.setstatus(stream, 500)
+                    HTTP.startwrite(stream)
+                    write(stream, "Error: $e")
+                    return
                 end
             end
         end
 
-        return HTTP.Response(404, "Not Found: $path")
+        HTTP.setstatus(stream, 404)
+        HTTP.startwrite(stream)
+        write(stream, "Not Found: $path")
     end
+
+    server = HTTP.listen!(stream_handler, host, actual_port)
 
     try
         wait(server)
