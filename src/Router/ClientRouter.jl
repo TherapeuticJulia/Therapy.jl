@@ -32,6 +32,9 @@ function client_router_script(; content_selector::String="#page-content", base_p
         debug: false
     };
 
+    // Track current navigation to cancel on rapid clicks
+    let currentNavigation = null;
+
     function log(...args) {
         if (CONFIG.debug) console.log('%c[Router]', 'color: #748ffc', ...args);
     }
@@ -134,6 +137,16 @@ function client_router_script(; content_selector::String="#page-content", base_p
             return;
         }
 
+        // Cancel any in-flight navigation (handles rapid clicking)
+        if (currentNavigation) {
+            currentNavigation.abort();
+            log('Cancelled previous navigation');
+        }
+
+        // Create new abort controller for this navigation
+        const abortController = new AbortController();
+        currentNavigation = abortController;
+
         // Show loading state (optional)
         container.style.opacity = '0.7';
         container.style.transition = 'opacity 0.1s';
@@ -144,7 +157,8 @@ function client_router_script(; content_selector::String="#page-content", base_p
                     [CONFIG.partialHeader]: '1',
                     'Accept': 'text/html'
                 },
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                signal: abortController.signal
             });
 
             if (!response.ok) {
@@ -152,6 +166,11 @@ function client_router_script(; content_selector::String="#page-content", base_p
             }
 
             let html = await response.text();
+
+            // Check if this navigation was cancelled while waiting for response
+            if (abortController.signal.aborted) {
+                return;
+            }
 
             // Check if we got a full HTML document (static site) or partial content (dev server)
             // Full documents start with <!DOCTYPE or <html
@@ -174,14 +193,30 @@ function client_router_script(; content_selector::String="#page-content", base_p
             container.innerHTML = html;
             container.style.opacity = '1';
 
+            // Clear current navigation tracker
+            if (currentNavigation === abortController) {
+                currentNavigation = null;
+            }
+
             // Re-hydrate all islands in the new content
             await hydrateIslands();
 
             log('Page loaded successfully');
 
         } catch (error) {
+            // Ignore abort errors (expected when clicking fast)
+            if (error.name === 'AbortError') {
+                log('Navigation cancelled');
+                return;
+            }
+
             console.error('[Router] Failed to load page:', error);
             container.style.opacity = '1';
+
+            // Clear current navigation tracker
+            if (currentNavigation === abortController) {
+                currentNavigation = null;
+            }
 
             // Fallback to full page navigation
             window.location.href = path;
