@@ -29,7 +29,8 @@ function client_router_script(; content_selector::String="#page-content", base_p
         contentSelector: '$(content_selector)',
         basePath: '$(base_path)',
         partialHeader: 'X-Therapy-Partial',
-        debug: false
+        // Enable debug logging - can be toggled via TherapyRouter.setDebug(true/false)
+        debug: true
     };
 
     // Track current navigation to cancel on rapid clicks
@@ -177,6 +178,7 @@ function client_router_script(; content_selector::String="#page-content", base_p
 
             // Check if we got a full HTML document (static site) or partial content (dev server)
             // Full documents start with <!DOCTYPE or <html
+            let scriptsToExecute = [];
             if (html.trim().toLowerCase().startsWith('<!doctype') || html.trim().toLowerCase().startsWith('<html')) {
                 log('Got full page, extracting content...');
                 // Parse the full document and extract just the content area
@@ -190,6 +192,26 @@ function client_router_script(; content_selector::String="#page-content", base_p
                     log('Content selector not found in response, using body');
                     html = doc.body ? doc.body.innerHTML : html;
                 }
+
+                // Extract hydration scripts from the body (they're outside #therapy-content)
+                // These contain TherapyHydrate registration functions for islands
+                const scripts = doc.querySelectorAll('body script:not([src])');
+                log('Found', scripts.length, 'inline scripts in body');
+                scripts.forEach((script, idx) => {
+                    const content = script.textContent;
+                    // Only collect Therapy-related scripts (safety check)
+                    if (content && (content.includes('TherapyHydrate') || content.includes('TherapyWS'))) {
+                        scriptsToExecute.push(content);
+                        log('Script', idx, 'contains Therapy code, length:', content.length);
+                    } else {
+                        log('Script', idx, 'skipped, length:', content ? content.length : 0);
+                    }
+                });
+                if (scriptsToExecute.length > 0) {
+                    log('Collected', scriptsToExecute.length, 'hydration scripts to execute');
+                } else {
+                    log('WARNING: No hydration scripts found!');
+                }
             }
 
             // Swap content
@@ -200,6 +222,23 @@ function client_router_script(; content_selector::String="#page-content", base_p
             if (currentNavigation === abortController) {
                 currentNavigation = null;
             }
+
+            // Execute any hydration scripts extracted from the full page
+            // This registers TherapyHydrate functions before we try to call them
+            // Set flag to prevent auto-hydration (router will call hydrateIslands)
+            window._therapyRouterHydrating = true;
+            for (const scriptContent of scriptsToExecute) {
+                try {
+                    const script = document.createElement('script');
+                    script.textContent = scriptContent;
+                    document.head.appendChild(script);
+                    document.head.removeChild(script);
+                    log('Executed hydration script');
+                } catch (e) {
+                    console.error('[Router] Failed to execute hydration script:', e);
+                }
+            }
+            window._therapyRouterHydrating = false;
 
             // Re-hydrate all islands in the new content
             await hydrateIslands();
@@ -212,6 +251,11 @@ function client_router_script(; content_selector::String="#page-content", base_p
             // Re-discover and subscribe to any new server signals in the content
             if (typeof TherapyWS !== 'undefined' && TherapyWS.discoverAndSubscribe) {
                 TherapyWS.discoverAndSubscribe();
+            }
+
+            // Show static mode warnings on any new ws-example elements
+            if (typeof TherapyWS !== 'undefined' && TherapyWS.showStaticModeWarningOnNewElements) {
+                TherapyWS.showStaticModeWarningOnNewElements();
             }
 
             log('Page loaded successfully');
@@ -245,16 +289,28 @@ function client_router_script(; content_selector::String="#page-content", base_p
 
         for (const island of islands) {
             const componentName = island.dataset.component;
-            if (!componentName) continue;
+            if (!componentName) {
+                console.warn('[Router] Found therapy-island without data-component attribute');
+                continue;
+            }
 
-            // Look for registered hydration function
-            if (window.TherapyHydrate && typeof window.TherapyHydrate[componentName] === 'function') {
+            // Registry uses lowercase keys (see Hydration.jl)
+            const registryKey = componentName.toLowerCase();
+            log('Looking for hydration function:', componentName, '-> registry key:', registryKey);
+            log('TherapyHydrate registry:', window.TherapyHydrate ? Object.keys(window.TherapyHydrate) : 'undefined');
+
+            // Look for registered hydration function (using lowercase key)
+            if (window.TherapyHydrate && typeof window.TherapyHydrate[registryKey] === 'function') {
                 try {
-                    await window.TherapyHydrate[componentName]();
+                    log('Calling hydration function for:', registryKey);
+                    await window.TherapyHydrate[registryKey]();
                     log('Hydrated island:', componentName);
                 } catch (error) {
                     console.error('[Router] Failed to hydrate island:', componentName, error);
                 }
+            } else {
+                console.warn('[Router] No hydration function found for:', registryKey);
+                console.warn('[Router] Available functions:', window.TherapyHydrate ? Object.keys(window.TherapyHydrate) : 'none');
             }
         }
     }
@@ -344,7 +400,8 @@ function client_router_script(; content_selector::String="#page-content", base_p
         navigate,
         loadPage,
         hydrateIslands,
-        updateActiveLinks
+        updateActiveLinks,
+        setDebug: (enabled) => { CONFIG.debug = enabled; }
     };
 
     // Initialize when DOM is ready

@@ -2,6 +2,8 @@
 #
 # Demonstrates Therapy.jl's real-time WebSocket capabilities
 # - Server signals (read-only on client)
+# - Bidirectional signals (client ↔ server sync)
+# - Message channels (discrete messaging)
 # - Automatic reconnection
 # - Graceful degradation on static hosting
 
@@ -11,24 +13,50 @@ function WebSocketExample()
         # Page Header
         Div(:class => "mb-8",
             H1(:class => "text-4xl font-serif font-semibold text-neutral-900 dark:text-neutral-100 mb-4",
-                "WebSocket Server Signals"
+                "WebSocket Real-Time Features"
             ),
             P(:class => "text-xl text-neutral-600 dark:text-neutral-400",
-                "Real-time updates from server to all connected browsers."
+                "Server signals, collaborative editing, and live chat - all via WebSocket."
             )
         ),
 
-        # Live Demo Section
+        # Demo Section 1: Visitor Counter (Server Signal)
         Section(:class => "mb-12",
             H2(:class => "text-2xl font-serif font-semibold text-neutral-900 dark:text-neutral-100 mb-4",
-                "Live Visitor Counter"
+                "1. Server Signals (Read-Only)"
             ),
             P(:class => "text-neutral-600 dark:text-neutral-400 mb-6",
-                "This counter shows how many browsers are currently connected. Open this page in multiple tabs or browsers to see it update in real-time."
+                "Server signals are controlled server-side and broadcast to all clients. This visitor counter updates automatically when browsers connect/disconnect."
             ),
 
             # The VisitorCounter component (defined in components/)
             VisitorCounter()
+        ),
+
+        # Demo Section 2: Collaborative Text (Bidirectional Signal)
+        Section(:class => "mb-12",
+            H2(:class => "text-2xl font-serif font-semibold text-neutral-900 dark:text-neutral-100 mb-4",
+                "2. Bidirectional Signals (Collaborative)"
+            ),
+            P(:class => "text-neutral-600 dark:text-neutral-400 mb-6",
+                "Bidirectional signals can be modified by both server AND clients. Changes sync in real-time using JSON patches (RFC 6902)."
+            ),
+
+            # The CollaborativeText component (defined in components/)
+            CollaborativeText()
+        ),
+
+        # Demo Section 3: Chat Room (Channel)
+        Section(:class => "mb-12",
+            H2(:class => "text-2xl font-serif font-semibold text-neutral-900 dark:text-neutral-100 mb-4",
+                "3. Message Channels (Chat)"
+            ),
+            P(:class => "text-neutral-600 dark:text-neutral-400 mb-6",
+                "Channels are for discrete messages (events), not continuous state. Messages are delivered but not persisted."
+            ),
+
+            # The ChatRoom component (defined in components/)
+            ChatRoom()
         ),
 
         # How It Works

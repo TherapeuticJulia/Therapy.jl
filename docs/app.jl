@@ -72,6 +72,47 @@ on_ws_disconnect() do conn
 end
 
 # =============================================================================
+# Bidirectional Signals (Collaborative Features)
+# =============================================================================
+
+# Shared document for collaborative text editing
+# Both server and clients can modify - changes sync via JSON patches
+shared_doc = create_bidirectional_signal("shared_doc", "")
+
+# Optional: Add validation handler
+on_bidirectional_update("shared_doc") do conn, new_value
+    # Could validate/sanitize here
+    # Return false to reject, true to accept, or a modified value
+    if length(new_value) > 50000
+        @warn "Document too large, rejecting update"
+        return false  # Reject updates over 50KB
+    end
+    return true  # Accept the update
+end
+
+# =============================================================================
+# Message Channels (Chat)
+# =============================================================================
+
+# Create a chat channel for discrete messaging
+chat = create_channel("chat")
+
+# Handle incoming chat messages
+on_channel_message("chat") do conn, data
+    # Add metadata and broadcast to ALL clients (including sender)
+    message = Dict(
+        "text" => get(data, "text", ""),
+        "timestamp" => time(),
+        "from" => conn.id[1:8]  # Short connection ID
+    )
+
+    # Broadcast to all connected clients
+    broadcast_channel!("chat", message)
+
+    println("[Chat] $(message["from"]): $(message["text"])")
+end
+
+# =============================================================================
 # Run - dev or build based on args
 # =============================================================================
 

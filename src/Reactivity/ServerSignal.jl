@@ -2,6 +2,9 @@
 #
 # Server signals are read-only on the client. When the server updates them,
 # all subscribed WebSocket clients receive the new value automatically.
+#
+# Updates are sent as JSON patches (RFC 6902) for efficiency when the value
+# is complex (Dict or Vector). Simple values are sent as full replacements.
 
 """
 A server-controlled signal that broadcasts updates to WebSocket clients.
@@ -9,7 +12,7 @@ A server-controlled signal that broadcasts updates to WebSocket clients.
 Unlike regular signals which are client-side only, ServerSignals:
 - Are created and managed on the server
 - Can only be modified by server code
-- Automatically broadcast to all subscribed WebSocket clients
+- Automatically broadcast to all subscribed WebSocket clients (as JSON patches)
 - Are read-only on the client side
 
 # Example
@@ -17,7 +20,7 @@ Unlike regular signals which are client-side only, ServerSignals:
 # Create a server signal
 visitors = create_server_signal("visitors", 0)
 
-# Update it (broadcasts to all subscribers)
+# Update it (broadcasts patch to all subscribers)
 set_server_signal!(visitors, visitors[] + 1)
 
 # Get current value
@@ -29,13 +32,14 @@ current = visitors[]
 mutable struct ServerSignal{T}
     name::String
     value::T
+    use_patches::Bool  # Whether to send patches (true) or full values (false)
 end
 
 # Note: SERVER_SIGNALS and broadcast_signal_update are defined in WebSocket.jl
 # which is included before this file in Therapy.jl
 
 """
-    create_server_signal(name::String, initial::T) -> ServerSignal{T}
+    create_server_signal(name::String, initial::T; use_patches::Bool=true) -> ServerSignal{T}
 
 Create a new server signal with the given name and initial value.
 The name must be unique across all server signals.
@@ -43,18 +47,23 @@ The name must be unique across all server signals.
 # Arguments
 - `name`: Unique identifier for this signal (used by clients to subscribe)
 - `initial`: Initial value of the signal
+- `use_patches`: Whether to send JSON patches (default: true for efficiency)
+  Set to false to always send full values
 
 # Example
 ```julia
 counter = create_server_signal("visitor_count", 0)
 messages = create_server_signal("chat_messages", String[])
+
+# Force full value updates (no patches)
+data = create_server_signal("full_data", Dict(); use_patches=false)
 ```
 """
-function create_server_signal(name::String, initial::T) where T
+function create_server_signal(name::String, initial::T; use_patches::Bool=true) where T
     if haskey(SERVER_SIGNALS, name)
         error("Server signal '$name' already exists")
     end
-    signal = ServerSignal{T}(name, initial)
+    signal = ServerSignal{T}(name, initial, use_patches)
     SERVER_SIGNALS[name] = signal
     return signal
 end
@@ -64,21 +73,44 @@ end
 
 Update a server signal's value and broadcast to all subscribed clients.
 
+If use_patches is enabled (default), computes and sends a JSON patch.
+Otherwise sends the full new value.
+
 # Example
 ```julia
 visitors = create_server_signal("visitors", 0)
-set_server_signal!(visitors, 42)  # All subscribers receive {"type": "signal_update", "signal": "visitors", "value": 42}
+set_server_signal!(visitors, 42)  # Sends patch: {"type": "signal_patch", "signal": "visitors", "patch": [{"op": "replace", "path": "", "value": 42}]}
 ```
 """
 function set_server_signal!(signal::ServerSignal{T}, value::T) where T
+    old_value = signal.value
     signal.value = value
-    broadcast_signal_update(signal.name, value)
+
+    if signal.use_patches
+        # Compute and broadcast JSON patch
+        patch = compute_patch(old_value, value)
+        if !isempty(patch)
+            broadcast_signal_patch(signal.name, patch)
+        end
+    else
+        # Fallback to full value broadcast
+        broadcast_signal_update(signal.name, value)
+    end
 end
 
 # Also allow setting with different but convertible types
 function set_server_signal!(signal::ServerSignal{T}, value) where T
+    old_value = signal.value
     signal.value = convert(T, value)
-    broadcast_signal_update(signal.name, signal.value)
+
+    if signal.use_patches
+        patch = compute_patch(old_value, signal.value)
+        if !isempty(patch)
+            broadcast_signal_patch(signal.name, patch)
+        end
+    else
+        broadcast_signal_update(signal.name, signal.value)
+    end
 end
 
 """

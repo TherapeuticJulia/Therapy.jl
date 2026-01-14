@@ -47,6 +47,9 @@ function websocket_client_script(;
     let connectionId = null;
     let isStaticMode = false;
 
+    // Track signal values for patch application
+    let signalValues = {};
+
     /**
      * Get WebSocket URL based on current page protocol
      */
@@ -153,6 +156,14 @@ function websocket_client_script(;
                 handleSignalUpdate(msg.signal, msg.value);
                 break;
 
+            case 'signal_patch':
+                handleSignalPatch(msg.signal, msg.patch);
+                break;
+
+            case 'channel_message':
+                handleChannelMessage(msg.channel, msg.data);
+                break;
+
             case 'error':
                 console.error('[WS] Server error:', msg.message);
                 break;
@@ -167,10 +178,13 @@ function websocket_client_script(;
     }
 
     /**
-     * Handle a signal update from the server
+     * Handle a signal update from the server (full value)
      */
     function handleSignalUpdate(signalName, value) {
         console.log('[WS] Signal update:', signalName, '=', value);
+
+        // Store the value for future patch application
+        signalValues[signalName] = value;
 
         // Update via TherapySignals if available (Wasm integration)
         if (window.TherapySignals && window.TherapySignals[signalName]) {
@@ -178,6 +192,155 @@ function websocket_client_script(;
         }
 
         // Also update DOM elements with data-server-signal attribute
+        updateSignalDOM(signalName, value);
+
+        // Dispatch custom event for custom handlers
+        window.dispatchEvent(new CustomEvent('therapy:signal:' + signalName, {
+            detail: { value: value }
+        }));
+    }
+
+    /**
+     * Handle a signal patch from the server (RFC 6902 JSON Patch)
+     */
+    function handleSignalPatch(signalName, patch) {
+        console.log('[WS] Signal patch:', signalName, patch);
+
+        // Get current value or initialize
+        let value = signalValues[signalName];
+        if (value === undefined) {
+            value = null;
+        }
+
+        // Apply each patch operation
+        for (const op of patch) {
+            value = applyPatchOp(value, op);
+        }
+
+        // Store the new value
+        signalValues[signalName] = value;
+
+        // Update via TherapySignals if available (Wasm integration)
+        if (window.TherapySignals && window.TherapySignals[signalName]) {
+            window.TherapySignals[signalName].set(value);
+        }
+
+        // Update DOM elements
+        updateSignalDOM(signalName, value);
+
+        // Dispatch custom event
+        window.dispatchEvent(new CustomEvent('therapy:signal:' + signalName, {
+            detail: { value: value }
+        }));
+    }
+
+    /**
+     * Apply a single JSON patch operation (RFC 6902)
+     */
+    function applyPatchOp(value, op) {
+        const path = op.path;
+        const operation = op.op;
+
+        // Root replacement
+        if (path === '' || path === '/') {
+            if (operation === 'replace' || operation === 'add') {
+                return op.value;
+            }
+            return null;
+        }
+
+        // Parse path: "/foo/bar/0" -> ["foo", "bar", "0"]
+        const parts = path.split('/').filter(p => p !== '');
+
+        // Handle nested path
+        if (operation === 'add' || operation === 'replace') {
+            return setAtPath(value, parts, op.value);
+        } else if (operation === 'remove') {
+            return removeAtPath(value, parts);
+        }
+
+        return value;
+    }
+
+    /**
+     * Set a value at a nested path in an object/array
+     */
+    function setAtPath(obj, parts, newValue) {
+        if (!obj) {
+            obj = {};
+        }
+        if (parts.length === 0) {
+            return newValue;
+        }
+
+        // Clone to avoid mutation
+        obj = JSON.parse(JSON.stringify(obj));
+
+        let current = obj;
+        for (let i = 0; i < parts.length - 1; i++) {
+            const part = parts[i];
+            if (Array.isArray(current)) {
+                const idx = parseInt(part, 10);
+                if (!current[idx]) {
+                    current[idx] = {};
+                }
+                current = current[idx];
+            } else {
+                if (!current[part]) {
+                    current[part] = {};
+                }
+                current = current[part];
+            }
+        }
+
+        const finalPart = parts[parts.length - 1];
+        if (Array.isArray(current)) {
+            const idx = finalPart === '-' ? current.length : parseInt(finalPart, 10);
+            current[idx] = newValue;
+        } else {
+            current[finalPart] = newValue;
+        }
+
+        return obj;
+    }
+
+    /**
+     * Remove a value at a nested path
+     */
+    function removeAtPath(obj, parts) {
+        if (!obj || parts.length === 0) {
+            return obj;
+        }
+
+        // Clone to avoid mutation
+        obj = JSON.parse(JSON.stringify(obj));
+
+        let current = obj;
+        for (let i = 0; i < parts.length - 1; i++) {
+            const part = parts[i];
+            if (Array.isArray(current)) {
+                current = current[parseInt(part, 10)];
+            } else {
+                current = current[part];
+            }
+            if (!current) return obj;
+        }
+
+        const finalPart = parts[parts.length - 1];
+        if (Array.isArray(current)) {
+            current.splice(parseInt(finalPart, 10), 1);
+        } else {
+            delete current[finalPart];
+        }
+
+        return obj;
+    }
+
+    /**
+     * Update DOM elements with data-server-signal or data-bidirectional-signal attribute
+     */
+    function updateSignalDOM(signalName, value) {
+        // Update read-only server signal elements
         document.querySelectorAll('[data-server-signal="' + signalName + '"]').forEach(function(el) {
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
                 el.value = value;
@@ -186,10 +349,163 @@ function websocket_client_script(;
             }
         });
 
-        // Dispatch custom event for custom handlers
-        window.dispatchEvent(new CustomEvent('therapy:signal:' + signalName, {
-            detail: { value: value }
+        // Update bidirectional signal elements (only if not focused, to avoid cursor jump)
+        document.querySelectorAll('[data-bidirectional-signal="' + signalName + '"]').forEach(function(el) {
+            if (document.activeElement === el) {
+                // Don't update if user is currently typing in this element
+                return;
+            }
+            if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                el.value = value;
+            } else {
+                el.textContent = value;
+            }
+        });
+    }
+
+    /**
+     * Compute a JSON patch between old and new values (client-side)
+     * Simplified version - handles basic types
+     */
+    function computePatch(oldValue, newValue) {
+        const patches = [];
+
+        // Handle simple values
+        if (typeof oldValue !== 'object' || typeof newValue !== 'object' ||
+            oldValue === null || newValue === null ||
+            Array.isArray(oldValue) !== Array.isArray(newValue)) {
+            if (oldValue !== newValue) {
+                patches.push({ op: 'replace', path: '', value: newValue });
+            }
+            return patches;
+        }
+
+        // Handle objects
+        if (!Array.isArray(newValue)) {
+            // Added or changed keys
+            for (const key of Object.keys(newValue)) {
+                if (!(key in oldValue)) {
+                    patches.push({ op: 'add', path: '/' + key, value: newValue[key] });
+                } else if (JSON.stringify(oldValue[key]) !== JSON.stringify(newValue[key])) {
+                    patches.push({ op: 'replace', path: '/' + key, value: newValue[key] });
+                }
+            }
+            // Removed keys
+            for (const key of Object.keys(oldValue)) {
+                if (!(key in newValue)) {
+                    patches.push({ op: 'remove', path: '/' + key });
+                }
+            }
+            return patches;
+        }
+
+        // For arrays, just replace if different (computing array diff is complex)
+        if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+            patches.push({ op: 'replace', path: '', value: newValue });
+        }
+        return patches;
+    }
+
+    /**
+     * Update a bidirectional signal from the client
+     * Sends changes to server, which validates and broadcasts to other clients
+     */
+    function setBidirectional(signalName, newValue) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.warn('[WS] Cannot update signal - not connected');
+            return false;
+        }
+
+        // Get current value
+        const oldValue = signalValues[signalName];
+
+        // Compute patch
+        const patch = computePatch(oldValue, newValue);
+
+        if (patch.length === 0) {
+            return true; // No change needed
+        }
+
+        // Optimistic update - update local state immediately
+        signalValues[signalName] = newValue;
+        updateSignalDOM(signalName, newValue);
+
+        // Send patch to server
+        send({
+            type: 'bidirectional_update',
+            signal: signalName,
+            patch: patch
+        });
+
+        console.log('[WS] Bidirectional update:', signalName, patch);
+        return true;
+    }
+
+    /**
+     * Get current value of a signal (for use before setBidirectional)
+     */
+    function getSignalValue(signalName) {
+        return signalValues[signalName];
+    }
+
+    /**
+     * Handle a channel message from the server
+     */
+    function handleChannelMessage(channelName, data) {
+        console.log('[WS] Channel message:', channelName, data);
+
+        // Dispatch custom event for this channel
+        window.dispatchEvent(new CustomEvent('therapy:channel:' + channelName, {
+            detail: data
         }));
+
+        // Also dispatch a general channel event
+        window.dispatchEvent(new CustomEvent('therapy:channel', {
+            detail: { channel: channelName, data: data }
+        }));
+    }
+
+    /**
+     * Send a message on a channel
+     */
+    function sendMessage(channelName, data) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            console.warn('[WS] Cannot send message - not connected');
+            return false;
+        }
+
+        send({
+            type: 'channel_message',
+            channel: channelName,
+            data: data
+        });
+
+        console.log('[WS] Sent channel message:', channelName, data);
+        return true;
+    }
+
+    /**
+     * Subscribe to channel messages (convenience for addEventListener)
+     */
+    function onChannelMessage(channelName, callback) {
+        window.addEventListener('therapy:channel:' + channelName, function(e) {
+            callback(e.detail);
+        });
+    }
+
+    /**
+     * Add warning banner to a single ws-example element
+     */
+    function addWarningToElement(el) {
+        if (el.querySelector('.ws-warning')) return;
+
+        const warning = document.createElement('div');
+        warning.className = 'ws-warning';
+        warning.style.cssText = 'background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #92400e;';
+        warning.innerHTML = '<strong style="display: block; margin-bottom: 4px;">\\u26A0\\uFE0F Live Demo Unavailable</strong>' +
+            '<span style="font-size: 14px;">This example requires a WebSocket server. Run locally with:</span>' +
+            '<code style="display: block; margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; font-family: monospace;">julia docs/app.jl dev</code>';
+        el.insertBefore(warning, el.firstChild);
     }
 
     /**
@@ -202,20 +518,21 @@ function websocket_client_script(;
         console.log('[WS] Static mode detected - WebSocket features unavailable');
 
         // Find all WebSocket example containers and add warning
-        document.querySelectorAll('[data-ws-example]').forEach(function(el) {
-            if (el.querySelector('.ws-warning')) return;
-
-            const warning = document.createElement('div');
-            warning.className = 'ws-warning';
-            warning.style.cssText = 'background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #92400e;';
-            warning.innerHTML = '<strong style="display: block; margin-bottom: 4px;">\\u26A0\\uFE0F Live Demo Unavailable</strong>' +
-                '<span style="font-size: 14px;">This example requires a WebSocket server. Run locally with:</span>' +
-                '<code style="display: block; margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; font-family: monospace;">julia docs/app.jl dev</code>';
-            el.insertBefore(warning, el.firstChild);
-        });
+        document.querySelectorAll('[data-ws-example]').forEach(addWarningToElement);
 
         // Dispatch static mode event
         window.dispatchEvent(new CustomEvent('therapy:ws:static_mode'));
+    }
+
+    /**
+     * Add warnings to any new ws-example elements loaded after static mode was detected
+     * Called by ClientRouter after SPA navigation
+     */
+    function showStaticModeWarningOnNewElements() {
+        if (!isStaticMode) return;
+
+        // Find any new ws-example elements that don't have warnings yet
+        document.querySelectorAll('[data-ws-example]').forEach(addWarningToElement);
     }
 
     // Track subscribed signals to avoid duplicates
@@ -237,14 +554,24 @@ function websocket_client_script(;
     }
 
     /**
-     * Discover and subscribe to signals from data-server-signal attributes
+     * Discover and subscribe to signals from data-server-signal and data-bidirectional-signal attributes
      * Called on connect and after SPA navigation
      */
     function discoverAndSubscribe() {
+        // Subscribe to read-only server signals
         document.querySelectorAll('[data-server-signal]').forEach(function(el) {
             var signalName = el.getAttribute('data-server-signal');
             if (signalName && !subscribedSignals.has(signalName)) {
                 console.log('[WS] Auto-subscribing to:', signalName);
+                subscribe(signalName);
+            }
+        });
+
+        // Subscribe to bidirectional signals (also need to receive updates)
+        document.querySelectorAll('[data-bidirectional-signal]').forEach(function(el) {
+            var signalName = el.getAttribute('data-bidirectional-signal');
+            if (signalName && !subscribedSignals.has(signalName)) {
+                console.log('[WS] Auto-subscribing to bidirectional:', signalName);
                 subscribe(signalName);
             }
         });
@@ -316,11 +643,19 @@ function websocket_client_script(;
         subscribe: subscribe,
         unsubscribe: unsubscribe,
         discoverAndSubscribe: discoverAndSubscribe,
+        showStaticModeWarningOnNewElements: showStaticModeWarningOnNewElements,
         sendAction: sendAction,
         send: send,
         isConnected: isConnected,
         getConnectionId: getConnectionId,
-        isStaticMode: function() { return isStaticMode; }
+        isStaticMode: function() { return isStaticMode; },
+        // Bidirectional signals
+        setBidirectional: setBidirectional,
+        getSignalValue: getSignalValue,
+        computePatch: computePatch,
+        // Channel messaging
+        sendMessage: sendMessage,
+        onChannelMessage: onChannelMessage
     };
 
     // Auto-connect when DOM is ready

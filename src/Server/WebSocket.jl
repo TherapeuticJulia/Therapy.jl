@@ -130,8 +130,26 @@ function handle_ws_message(conn::WSConnection, msg::Dict{String, Any})
         end
 
     elseif msg_type == "action"
-        # Client action (for bidirectional signals)
+        # Client action (for custom actions)
         handle_client_action(conn, msg)
+
+    elseif msg_type == "bidirectional_update"
+        # Client updating a bidirectional signal
+        signal_name = get(msg, "signal", nothing)
+        patch = get(msg, "patch", [])
+        if signal_name !== nothing
+            # handle_client_signal_update is defined in BidirectionalSignal.jl
+            handle_client_signal_update(conn, signal_name, patch)
+        end
+
+    elseif msg_type == "channel_message"
+        # Client sending a message on a channel
+        channel_name = get(msg, "channel", nothing)
+        data = get(msg, "data", nothing)
+        if channel_name !== nothing
+            # handle_channel_message is defined in Channel.jl
+            handle_channel_message(conn, channel_name, data)
+        end
 
     elseif msg_type == "ping"
         # Keepalive ping
@@ -178,7 +196,7 @@ function send_ws_error(conn::WSConnection, error_msg::String)
 end
 
 """
-Broadcast a signal update to all subscribed connections.
+Broadcast a signal update (full value) to all subscribed connections.
 """
 function broadcast_signal_update(signal_name::String, value)
     msg = Dict(
@@ -189,6 +207,42 @@ function broadcast_signal_update(signal_name::String, value)
 
     for (_, conn) in WS_CONNECTIONS
         if signal_name in conn.subscriptions
+            send_ws_message(conn, msg)
+        end
+    end
+end
+
+"""
+Broadcast a signal patch (RFC 6902) to all subscribed connections.
+More efficient than full updates for complex values.
+"""
+function broadcast_signal_patch(signal_name::String, patch::Vector)
+    msg = Dict(
+        "type" => "signal_patch",
+        "signal" => signal_name,
+        "patch" => patch
+    )
+
+    for (_, conn) in WS_CONNECTIONS
+        if signal_name in conn.subscriptions
+            send_ws_message(conn, msg)
+        end
+    end
+end
+
+"""
+Broadcast a signal patch to all subscribed connections EXCEPT one.
+Used for bidirectional signals to avoid echoing back to sender.
+"""
+function broadcast_signal_patch_except(signal_name::String, patch::Vector, exclude_conn_id::String)
+    msg = Dict(
+        "type" => "signal_patch",
+        "signal" => signal_name,
+        "patch" => patch
+    )
+
+    for (id, conn) in WS_CONNECTIONS
+        if id != exclude_conn_id && signal_name in conn.subscriptions
             send_ws_message(conn, msg)
         end
     end

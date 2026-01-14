@@ -34,7 +34,9 @@ Therapy.jl/
 │   │   ├── Signal.jl           # create_signal, batch, handler tracing
 │   │   ├── Effect.jl           # create_effect, dispose!, dependency tracking
 │   │   ├── Memo.jl             # create_memo with lazy evaluation
-│   │   └── ServerSignal.jl     # Server-controlled signals (WebSocket broadcast)
+│   │   ├── ServerSignal.jl     # Server-controlled signals (WebSocket broadcast)
+│   │   ├── BidirectionalSignal.jl  # Two-way signals (client ↔ server)
+│   │   └── Channel.jl          # Message channels for discrete events
 │   ├── DOM/
 │   │   ├── VNode.jl            # VNode, Fragment, Show, For conditionals
 │   │   ├── Elements.jl         # All HTML element factory functions
@@ -59,7 +61,8 @@ Therapy.jl/
 │   ├── Server/
 │   │   ├── DevServer.jl        # Development HTTP server
 │   │   ├── WebSocket.jl        # WebSocket connection handling
-│   │   └── WebSocketClient.jl  # Client-side JS generation
+│   │   ├── WebSocketClient.jl  # Client-side JS generation
+│   │   └── JSONPatch.jl        # RFC 6902 JSON Patch implementation
 │   ├── App/
 │   │   └── App.jl              # High-level app framework
 │   └── SSG/
@@ -299,29 +302,120 @@ Div(:data_ws_example => "true",
 )
 ```
 
-**JavaScript API:**
-```javascript
-// Check connection
-TherapyWS.isConnected()
-
-// Subscribe to additional signals
-TherapyWS.subscribe("chat_messages")
-
-// Re-scan DOM for new server signals (called automatically on SPA navigation)
-TherapyWS.discoverAndSubscribe()
-
-// Events
-window.addEventListener('therapy:ws:connected', () => { ... })
-window.addEventListener('therapy:signal:visitors', (e) => {
-    console.log('New value:', e.detail.value)
-})
-```
-
 **Features:**
 - Auto-reconnect with exponential backoff
 - Auto-discover `data-server-signal` elements on page load and SPA navigation
 - Graceful degradation: shows warning on static hosting (GitHub Pages)
 - wss:// on HTTPS, ws:// on HTTP
+- JSON patches (RFC 6902) for efficient updates
+
+### Bidirectional Signals (Collaborative)
+
+Bidirectional signals can be modified by both server AND clients:
+
+```julia
+# Create a bidirectional signal for collaborative editing
+shared_doc = create_bidirectional_signal("shared_doc", "")
+
+# Add validation handler (optional)
+on_bidirectional_update("shared_doc") do conn, new_value
+    if length(new_value) > 50000
+        return false  # Reject updates over 50KB
+    end
+    return true  # Accept
+end
+
+# Server can also update (broadcasts to all clients)
+set_bidirectional_signal!(shared_doc, "Hello from server!")
+```
+
+Client-side with `data-bidirectional-signal`:
+
+```julia
+# Textarea that syncs with server and other clients
+Textarea(
+    :data_bidirectional_signal => "shared_doc",
+    :oninput => "TherapyWS.setBidirectional('shared_doc', this.value)"
+)
+```
+
+Changes sync using JSON patches (RFC 6902) - only diffs are sent, not full values.
+
+### Message Channels (Chat)
+
+Channels are for discrete messages (events), not continuous state:
+
+```julia
+# Create a chat channel
+chat = create_channel("chat")
+
+# Handle incoming messages from clients
+on_channel_message("chat") do conn, data
+    message = Dict(
+        "text" => data["text"],
+        "from" => conn.id[1:8],
+        "timestamp" => time()
+    )
+    broadcast_channel!("chat", message)
+end
+
+# Server can also send messages
+broadcast_channel!("chat", Dict("text" => "Server announcement!"))
+
+# Send to specific connection
+send_channel!("private", conn_id, Dict("text" => "Hello!"))
+
+# Broadcast except sender (avoid echo)
+broadcast_channel_except!("chat", message, sender_conn_id)
+```
+
+Client-side listening:
+
+```javascript
+// Send a message
+TherapyWS.sendMessage('chat', { text: 'Hello!' });
+
+// Listen for messages
+TherapyWS.onChannelMessage('chat', function(data) {
+    console.log('Message:', data.text, 'from', data.from);
+});
+
+// Or use DOM events
+window.addEventListener('therapy:channel:chat', function(e) {
+    console.log('Message:', e.detail);
+});
+```
+
+### WebSocket JavaScript API
+
+```javascript
+// Connection status
+TherapyWS.isConnected()
+TherapyWS.getConnectionId()
+
+// Server signals (read-only)
+TherapyWS.subscribe("signal_name")
+TherapyWS.unsubscribe("signal_name")
+TherapyWS.discoverAndSubscribe()  // Auto-scan DOM
+
+// Bidirectional signals
+TherapyWS.setBidirectional("signal_name", newValue)
+TherapyWS.getSignalValue("signal_name")
+
+// Channel messaging
+TherapyWS.sendMessage("channel_name", { data: "here" })
+TherapyWS.onChannelMessage("channel_name", callback)
+
+// Events
+window.addEventListener('therapy:ws:connected', () => { ... })
+window.addEventListener('therapy:ws:disconnected', () => { ... })
+window.addEventListener('therapy:signal:visitors', (e) => {
+    console.log('New value:', e.detail.value)
+})
+window.addEventListener('therapy:channel:chat', (e) => {
+    console.log('Message:', e.detail)
+})
+```
 
 ### Tailwind CSS
 
@@ -538,9 +632,9 @@ Therapy.jl aims for feature parity with Leptos.rs. Current status:
 | Auto-reconnect | ✅ | ✅ Exponential backoff | Done |
 | Auto-discover DOM bindings | ❌ Manual | ✅ `data-server-signal` attr | **Ahead!** |
 | Static hosting graceful degradation | ❌ | ✅ Warning UI | **Ahead!** |
-| Bidirectional signals | ✅ `leptos_ws` | ❌ | **P1** |
-| Channel signals (messaging) | ✅ `ChannelSignal` | ❌ | P2 |
-| JSON patch sync | ✅ | ❌ (sends full values) | P2 |
+| JSON patch sync | ✅ | ✅ RFC 6902 | Done |
+| Bidirectional signals | ✅ `leptos_ws` | ✅ `create_bidirectional_signal()` | Done |
+| Channel signals (messaging) | ✅ `ChannelSignal` | ✅ `create_channel()` | Done |
 | Server function streaming | ⚠️ PR #3656 | ❌ | P3 |
 | **Router** | | | |
 | Client-side navigation | ✅ | ✅ | Done |
@@ -988,16 +1082,6 @@ end
 2. **No Server Functions**
    - Manual fetch() calls required
    - Roadmap Phase 3
-
-3. **WebSocket: No JSON Patches**
-   - Currently sends full values, not diffs
-   - Less efficient for large objects
-   - Roadmap P2
-
-4. **WebSocket: No Bidirectional Signals**
-   - Server signals are read-only on client
-   - No collaborative editing support yet
-   - Roadmap P1
 
 ---
 

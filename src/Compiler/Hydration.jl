@@ -36,12 +36,14 @@ function generate_hydration_js(analysis::ComponentAnalysis; container_selector::
     # Query helper - scoped to container if provided
     query_base = isnothing(container_selector) ? "document" : "container"
     container_init = isnothing(container_selector) ? "" : """
-    const container = document.querySelector('$(container_selector)');
-    if (!container) {
-        console.error('[Hydration] Container not found: $(container_selector)');
-        return;
-    }
-    console.log('%c[Hydration] Scoped to container: $(container_selector)', 'color: #748ffc');
+        const container = document.querySelector('$(container_selector)');
+        if (!container) {
+            console.error('[Hydration] Container not found: $(container_selector)');
+            console.error('[Hydration] Available therapy-islands:', document.querySelectorAll('therapy-island').length);
+            document.querySelectorAll('therapy-island').forEach(el => console.log('  Found island:', el.dataset.component));
+            return;
+        }
+        console.log('%c[Hydration] Scoped to container: $(container_selector)', 'color: #748ffc');
 """
 
     # Generate the handler connections
@@ -102,13 +104,18 @@ function generate_hydration_js(analysis::ComponentAnalysis; container_selector::
         console.log('%c  Therapy.jl - Hydrating $(component_name)', 'color: #e94560; font-weight: bold');
         console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #e94560');
 
+        try {
         // Signals discovered:
         // $(join(signal_info, "\n        // "))
 
 $(container_init)
         // Load WebAssembly module
-        console.log('%c[Hydration] Loading Wasm module...', 'color: #748ffc');
+        console.log('%c[Hydration] Loading Wasm module from: $(wasm_path)', 'color: #748ffc');
         const response = await fetch('$(wasm_path)');
+        if (!response.ok) {
+            console.error('[Hydration] Failed to fetch Wasm:', response.status, response.statusText);
+            return;
+        }
         const bytes = await response.arrayBuffer();
         console.log('%c[Hydration] Module size: ' + bytes.byteLength + ' bytes', 'color: #748ffc');
 
@@ -207,16 +214,23 @@ $(container_init)
         window.TherapyWasm['$(registry_key)'] = wasm;
 
         return wasm;
+        } catch (error) {
+            console.error('[Hydration] Error hydrating $(component_name):', error);
+            throw error;
+        }
     }
 
     // Register hydration function globally for re-hydration after navigation
     window.TherapyHydrate['$(registry_key)'] = hydrate_$(registry_key);
 
-    // Auto-hydrate on initial page load
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', hydrate_$(registry_key));
-    } else {
-        hydrate_$(registry_key)();
+    // Auto-hydrate on initial page load (skip if router will handle it)
+    // The router sets this flag before executing extracted scripts
+    if (!window._therapyRouterHydrating) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', hydrate_$(registry_key));
+        } else {
+            hydrate_$(registry_key)();
+        }
     }
 })();
 """
