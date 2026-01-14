@@ -11,7 +11,7 @@ struct HydrationOutput
 end
 
 """
-    generate_hydration_js(analysis::ComponentAnalysis; container_selector=nothing) -> HydrationOutput
+    generate_hydration_js(analysis::ComponentAnalysis; container_selector=nothing, component_name="component", wasm_path="./app.wasm") -> HydrationOutput
 
 Generate JavaScript code to hydrate the server-rendered HTML.
 
@@ -20,11 +20,17 @@ The generated code:
 - Connects event handlers to DOM elements
 - Sets up DOM update callbacks for Wasm
 - Initializes theme signals from current DOM state
+- Registers globally for re-hydration after client-side navigation
 
 If `container_selector` is provided, all DOM queries are scoped within that container.
 This is important when embedding compiled components in pages with other data-hk attributes.
+
+The `component_name` is used to register the hydration function globally on
+`window.TherapyHydrate[name]` for re-hydration after SPA navigation.
+
+The `wasm_path` specifies the path to the Wasm module (default: "./app.wasm").
 """
-function generate_hydration_js(analysis::ComponentAnalysis; container_selector::Union{String,Nothing}=nothing)
+function generate_hydration_js(analysis::ComponentAnalysis; container_selector::Union{String,Nothing}=nothing, component_name::String="component", wasm_path::String="./app.wasm")
     event_bindings = [(h.target_hk, h.event, h.id) for h in analysis.handlers]
 
     # Query helper - scoped to container if provided
@@ -78,115 +84,140 @@ function generate_hydration_js(analysis::ComponentAnalysis; container_selector::
         push!(signal_info, "signal_$(signal.id): $(signal.initial_value) ($(signal.type))")
     end
 
-    js = """
-// Therapy.jl Hydration - Auto-generated
-(async function() {
-    console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #e94560');
-    console.log('%c  Therapy.jl - Hydrating Component', 'color: #e94560; font-weight: bold');
-    console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #e94560');
+    # Lowercase component name for registry key
+    registry_key = lowercase(component_name)
 
-    // Signals discovered:
-    // $(join(signal_info, "\n    // "))
+    js = """
+// Therapy.jl Hydration - $(component_name)
+// Registered globally for re-hydration after client-side navigation
+(function() {
+    'use strict';
+
+    // Initialize global hydration registry
+    window.TherapyHydrate = window.TherapyHydrate || {};
+
+    // Hydration function for this component
+    async function hydrate_$(registry_key)() {
+        console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #e94560');
+        console.log('%c  Therapy.jl - Hydrating $(component_name)', 'color: #e94560; font-weight: bold');
+        console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #e94560');
+
+        // Signals discovered:
+        // $(join(signal_info, "\n        // "))
 
 $(container_init)
-    // Load WebAssembly module (relative path for GitHub Pages compatibility)
-    console.log('%c[Hydration] Loading Wasm module...', 'color: #748ffc');
-    const response = await fetch('./app.wasm');
-    const bytes = await response.arrayBuffer();
-    console.log('%c[Hydration] Module size: ' + bytes.byteLength + ' bytes', 'color: #748ffc');
+        // Load WebAssembly module
+        console.log('%c[Hydration] Loading Wasm module...', 'color: #748ffc');
+        const response = await fetch('$(wasm_path)');
+        const bytes = await response.arrayBuffer();
+        console.log('%c[Hydration] Module size: ' + bytes.byteLength + ' bytes', 'color: #748ffc');
 
-    // Query helper for scoped DOM access
-    const queryEl = (hk) => $(query_base).querySelector('[data-hk="' + hk + '"]');
+        // Query helper for scoped DOM access
+        const queryEl = (hk) => $(query_base).querySelector('[data-hk="' + hk + '"]');
 
-    // DOM imports for Wasm
-    // All numeric values are passed as f64 (JavaScript numbers)
-    const imports = {
-        dom: {
-            update_text: (hk, value) => {
-                const el = queryEl(hk);
-                if (el) {
-                    let displayValue;
-                    const format = el.dataset.format;
+        // DOM imports for Wasm
+        // All numeric values are passed as f64 (JavaScript numbers)
+        const imports = {
+            dom: {
+                update_text: (hk, value) => {
+                    const el = queryEl(hk);
+                    if (el) {
+                        let displayValue;
+                        const format = el.dataset.format;
 
-                    // Check for special format attributes
-                    if (format === 'xo') {
-                        // Square format: 0→"", 1→"X", 2→"O"
-                        displayValue = value === 0 ? '' : (value === 1 ? 'X' : 'O');
-                    } else if (format === 'turn') {
-                        // Turn format: 0→"X", 1→"O"
-                        displayValue = value === 0 ? 'X' : 'O';
-                    } else if (format === 'winner') {
-                        // Winner format: 0→"", 1→"X wins!", 2→"O wins!"
-                        displayValue = value === 0 ? '' : (value === 1 ? 'X wins! 🎉' : 'O wins! 🎉');
-                        // Also update parent badge styling
-                        const badge = el.parentElement;
-                        if (badge && badge.dataset.format === 'winner-badge') {
-                            if (value === 0) {
-                                badge.className = 'hidden mb-4 px-6 py-3 rounded-lg text-lg font-bold text-center';
-                            } else {
-                                const colors = value === 1
-                                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                    : 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300';
-                                badge.className = 'mb-4 px-6 py-3 rounded-lg text-lg font-bold text-center animate-bounce ' + colors;
+                        // Check for special format attributes
+                        if (format === 'xo') {
+                            // Square format: 0→"", 1→"X", 2→"O"
+                            displayValue = value === 0 ? '' : (value === 1 ? 'X' : 'O');
+                        } else if (format === 'turn') {
+                            // Turn format: 0→"X", 1→"O"
+                            displayValue = value === 0 ? 'X' : 'O';
+                        } else if (format === 'winner') {
+                            // Winner format: 0→"", 1→"X wins!", 2→"O wins!"
+                            displayValue = value === 0 ? '' : (value === 1 ? 'X wins! 🎉' : 'O wins! 🎉');
+                            // Also update parent badge styling
+                            const badge = el.parentElement;
+                            if (badge && badge.dataset.format === 'winner-badge') {
+                                if (value === 0) {
+                                    badge.className = 'hidden mb-4 px-6 py-3 rounded-lg text-lg font-bold text-center';
+                                } else {
+                                    const colors = value === 1
+                                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                        : 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300';
+                                    badge.className = 'mb-4 px-6 py-3 rounded-lg text-lg font-bold text-center animate-bounce ' + colors;
+                                }
+                                // Also toggle turn display visibility
+                                const turnDisplay = $(query_base).querySelector('[data-format=\"turn-display\"]');
+                                if (turnDisplay) turnDisplay.style.display = value === 0 ? '' : 'none';
                             }
-                            // Also toggle turn display visibility
-                            const turnDisplay = $(query_base).querySelector('[data-format=\"turn-display\"]');
-                            if (turnDisplay) turnDisplay.style.display = value === 0 ? '' : 'none';
+                        } else {
+                            // Default: show as integer if whole number
+                            displayValue = Number.isInteger(value) ? Math.trunc(value) : value;
                         }
-                    } else {
-                        // Default: show as integer if whole number
-                        displayValue = Number.isInteger(value) ? Math.trunc(value) : value;
+
+                        el.textContent = displayValue;
+                        console.log('%c[Wasm→DOM] update_text(hk=' + hk + ', value=' + displayValue + ')', 'color: #51cf66');
                     }
-
-                    el.textContent = displayValue;
-                    console.log('%c[Wasm→DOM] update_text(hk=' + hk + ', value=' + displayValue + ')', 'color: #51cf66');
+                },
+                set_visible: (hk, visible) => {
+                    const el = queryEl(hk);
+                    if (el) {
+                        el.style.display = visible ? '' : 'none';
+                        console.log('%c[Wasm→DOM] set_visible(hk=' + hk + ', visible=' + !!visible + ')', 'color: #be4bdb');
+                    }
+                },
+                set_dark_mode: (enabled) => {
+                    const isDark = !!enabled;
+                    document.documentElement.classList.toggle('dark', isDark);
+                    try {
+                        localStorage.setItem('therapy-theme', isDark ? 'dark' : 'light');
+                    } catch (e) {}
+                    console.log('%c[Wasm→DOM] set_dark_mode(enabled=' + isDark + ')', 'color: #9775fa');
                 }
-            },
-            set_visible: (hk, visible) => {
-                const el = queryEl(hk);
-                if (el) {
-                    el.style.display = visible ? '' : 'none';
-                    console.log('%c[Wasm→DOM] set_visible(hk=' + hk + ', visible=' + !!visible + ')', 'color: #be4bdb');
-                }
-            },
-            set_dark_mode: (enabled) => {
-                const isDark = !!enabled;
-                document.documentElement.classList.toggle('dark', isDark);
-                try {
-                    localStorage.setItem('therapy-theme', isDark ? 'dark' : 'light');
-                } catch (e) {}
-                console.log('%c[Wasm→DOM] set_dark_mode(enabled=' + isDark + ')', 'color: #9775fa');
             }
+        };
+
+        const { instance } = await WebAssembly.instantiate(bytes, imports);
+        const wasm = instance.exports;
+
+        console.log('%c[Hydration] ✓ Wasm loaded!', 'color: #51cf66; font-weight: bold');
+        console.log('%c[Hydration] Exports:', 'color: #ffd43b', Object.keys(wasm));
+
+        // Connect event handlers
+        $(join(handler_connections, "\n        "))
+
+        // Connect input bindings
+        $(join(input_connections, "\n        "))
+
+        // Initialize theme signals from current DOM state
+        // This ensures the Wasm signal matches the saved theme preference
+        $(generate_theme_init(analysis))
+
+        // Initialize (sync DOM with Wasm state)
+        if (wasm.init) {
+            wasm.init();
+            console.log('%c[Hydration] ✓ Initialized', 'color: #51cf66');
         }
-    };
 
-    const { instance } = await WebAssembly.instantiate(bytes, imports);
-    const wasm = instance.exports;
+        console.log('%c[Hydration] 🚀 $(component_name) hydrated!', 'color: #51cf66; font-weight: bold');
+        console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #e94560');
 
-    console.log('%c[Hydration] ✓ Wasm loaded!', 'color: #51cf66; font-weight: bold');
-    console.log('%c[Hydration] Exports:', 'color: #ffd43b', Object.keys(wasm));
+        // Expose for debugging
+        window.TherapyWasm = window.TherapyWasm || {};
+        window.TherapyWasm['$(registry_key)'] = wasm;
 
-    // Connect event handlers
-    $(join(handler_connections, "\n    "))
-
-    // Connect input bindings
-    $(join(input_connections, "\n    "))
-
-    // Initialize theme signals from current DOM state
-    // This ensures the Wasm signal matches the saved theme preference
-    $(generate_theme_init(analysis))
-
-    // Initialize (sync DOM with Wasm state)
-    if (wasm.init) {
-        wasm.init();
-        console.log('%c[Hydration] ✓ Initialized', 'color: #51cf66');
+        return wasm;
     }
 
-    console.log('%c[Hydration] 🚀 Component hydrated!', 'color: #51cf66; font-weight: bold');
-    console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color: #e94560');
+    // Register hydration function globally for re-hydration after navigation
+    window.TherapyHydrate['$(registry_key)'] = hydrate_$(registry_key);
 
-    // Expose for debugging
-    window.TherapyWasm = wasm;
+    // Auto-hydrate on initial page load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', hydrate_$(registry_key));
+    } else {
+        hydrate_$(registry_key)();
+    }
 })();
 """
 

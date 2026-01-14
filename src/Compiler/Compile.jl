@@ -17,7 +17,7 @@ struct CompiledComponent
 end
 
 """
-    compile_component(component_fn::Function; container_selector=nothing) -> CompiledComponent
+    compile_component(component_fn::Function; container_selector=nothing, component_name="component", wasm_path="./app.wasm") -> CompiledComponent
 
 Compile a Therapy.jl component for client-side execution.
 
@@ -31,6 +31,8 @@ This is the main entry point for compiling components. It:
 - `component_fn`: The component function to compile
 - `container_selector`: Optional CSS selector to scope DOM queries (e.g., "#my-app").
   Use this when embedding the component in a page with other data-hk attributes.
+- `component_name`: Name of the component (used for hydration registration)
+- `wasm_path`: Path to the Wasm module for the hydration script
 
 # Example
 ```julia
@@ -54,7 +56,7 @@ html = compiled.html
 js = compiled.hydration.js
 ```
 """
-function compile_component(component_fn::Function; container_selector::Union{String,Nothing}=nothing)
+function compile_component(component_fn::Function; container_selector::Union{String,Nothing}=nothing, component_name::String="component", wasm_path::String="./app.wasm")
     # Step 1: Analyze the component
     println("Analyzing component...")
     analysis = analyze_component(component_fn)
@@ -70,7 +72,7 @@ function compile_component(component_fn::Function; container_selector::Union{Str
 
     # Step 3: Generate hydration JS
     println("Generating hydration code...")
-    hydration = generate_hydration_js(analysis; container_selector=container_selector)
+    hydration = generate_hydration_js(analysis; container_selector=container_selector, component_name=component_name, wasm_path=wasm_path)
 
     return CompiledComponent(analysis, wasm, hydration, analysis.html)
 end

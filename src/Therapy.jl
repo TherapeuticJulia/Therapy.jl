@@ -70,6 +70,7 @@ export render_to_string, render_page
 
 # Exports - Router
 export create_router, match_route, handle_request, NavLink, router_script, print_routes
+export client_router_script  # Client-side routing
 
 # Exports - Tailwind
 export tailwind_cdn, tailwind_config

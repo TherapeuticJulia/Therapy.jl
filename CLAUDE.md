@@ -422,6 +422,14 @@ Therapy.jl aims for feature parity with Leptos.rs. Current status:
 | Server functions (@server RPC) | ✅ | ❌ | **P1** |
 | ActionForm (progressive) | ✅ | ❌ | P2 |
 | Serialization server↔client | ✅ | ❌ | **P1** |
+| **WebSocket & Real-Time** | | | |
+| WebSocket connection | ✅ `provide_websocket()` | ❌ | **P1** |
+| Server signals (read-only client) | ✅ `leptos_server_signal` | ❌ | **P1** |
+| Bidirectional signals | ✅ `leptos_ws` | ❌ | **P1** |
+| Channel signals (messaging) | ✅ `ChannelSignal` | ❌ | P2 |
+| JSON patch sync | ✅ | ❌ | **P1** |
+| Auto-reconnect | ✅ | ❌ | P2 |
+| Server function streaming | ⚠️ PR #3656 | ❌ | P2 |
 | **Router** | | | |
 | Client-side navigation | ✅ | ❌ | **P1** |
 | Nested routes + Outlet | ✅ | ❌ | P2 |
@@ -437,6 +445,238 @@ Therapy.jl aims for feature parity with Leptos.rs. Current status:
 | Out-of-order streaming | ✅ | ❌ | P3 |
 | **Optimization** | | | |
 | Code splitting (@lazy) | ✅ | ❌ | P3 |
+
+---
+
+## Leptos WebSocket Architecture (Parity Target)
+
+Leptos has **three layers** of WebSocket support that we need to match:
+
+### 1. leptos_server_signal (Server → Client)
+
+Server-controlled signals that are **read-only on the client**. Changes sent as **JSON patches** (efficient diffs).
+
+**Use cases:** Real-time dashboards, live data feeds, notifications, multiplayer game state
+
+```rust
+// Leptos (Rust)
+// Server side
+let signal = ServerSignal::new(initial_value);
+signal.with(|s| *s = new_value); // Broadcasts to all clients
+
+// Client side (read-only)
+let value = create_server_signal::<MyType>();
+```
+
+**Therapy.jl equivalent needed:**
+```julia
+# Server side
+count = create_server_signal(0)
+set_server_signal!(count, 5)  # Broadcasts via WebSocket
+
+# Client side (read-only, auto-synced)
+# Signal updates automatically when server pushes
+```
+
+### 2. leptos_ws (Bidirectional)
+
+Three signal types for different communication patterns:
+
+| Type | Direction | Use Case |
+|------|-----------|----------|
+| `ReadOnlySignal` | Server → Client | Live data, notifications |
+| `BiDirectionalSignal` | Server ↔ Client | Collaborative editing, shared state |
+| `ChannelSignal` | Messages both ways | Chat, discrete events |
+
+**Key feature:** All use JSON patches for efficient sync (only send diffs, not full state).
+
+### 3. Server Function WebSocket Transport (PR #3656)
+
+Extends `#[server]` functions to work over WebSocket with **streaming** support:
+- Accept streams of items from client
+- Emit streams of items to client
+- Same API as HTTP server functions, different transport
+
+---
+
+## WebSocket Implementation Plan for Therapy.jl
+
+### Phase 2.5: WebSocket Infrastructure (NEW - High Priority)
+
+**Goal:** Real-time server-client communication matching Leptos capabilities
+
+#### Step 1: WebSocket Connection Layer
+
+```julia
+# Server-side: WebSocket endpoint using HTTP.jl
+function ws_endpoint(ws::HTTP.WebSocket)
+    # Register connection
+    connection_id = register_ws_connection(ws)
+
+    try
+        while !eof(ws)
+            msg = String(readavailable(ws))
+            handle_ws_message(connection_id, JSON.parse(msg))
+        end
+    finally
+        unregister_ws_connection(connection_id)
+    end
+end
+
+# Client-side (in hydration JS):
+function provide_websocket(url) {
+    const ws = new WebSocket(url);
+    ws.onmessage = (e) => handleServerMessage(JSON.parse(e.data));
+    // Auto-reconnect logic
+    return ws;
+}
+```
+
+**Files:** `src/Server/WebSocket.jl`, `src/Compiler/Hydration.jl`
+
+#### Step 2: Server Signals (Read-Only Client)
+
+```julia
+# Create a server-controlled signal
+visitors = create_server_signal(Int32(0))
+
+# Server can update - broadcasts to all connected clients
+function on_new_visitor()
+    update_server_signal!(visitors, visitors[] + 1)
+end
+
+# In component (client reads, can't write)
+Div("Current visitors: ", visitors)
+```
+
+**Implementation:**
+- Server maintains signal registry with current values
+- On update, compute JSON patch and broadcast to all connections
+- Client hydration JS receives patches and updates local signal copy
+- Wasm globals updated via `set_signal_X()` exports
+
+**Files:** `src/Reactivity/ServerSignal.jl`, `src/Server/SignalBroadcast.jl`
+
+#### Step 3: Bidirectional Signals
+
+```julia
+# Shared state - both server and client can modify
+shared_doc = create_shared_signal(DocumentState())
+
+# Client modification (via Wasm handler)
+:on_input => (text) -> update_shared!(shared_doc, text)
+
+# Server modification (e.g., from another client or server logic)
+update_shared!(shared_doc, validated_text)
+```
+
+**Implementation:**
+- Client changes send patches to server via WebSocket
+- Server validates, applies, and rebroadcasts to other clients
+- Conflict resolution: last-write-wins or custom merge function
+- Optimistic updates on client (rollback if server rejects)
+
+**Files:** `src/Reactivity/SharedSignal.jl`
+
+#### Step 4: Channel Signals (Messaging)
+
+```julia
+# Create a typed message channel
+chat = create_channel(ChatMessage)
+
+# Send from client (in Wasm handler)
+:on_click => () -> send!(chat, ChatMessage(user_id, text()))
+
+# Receive on client (reactive)
+For(messages(chat)) do msg
+    ChatBubble(msg)
+end
+
+# Server can also send
+broadcast!(chat, SystemMessage("User joined"))
+```
+
+**Files:** `src/Reactivity/Channel.jl`
+
+#### Step 5: JSON Patch Protocol
+
+Efficient sync using RFC 6902 JSON Patches:
+
+```julia
+# Instead of sending full state:
+# { "users": [...100 users...] }
+
+# Send only the diff:
+# [{"op": "add", "path": "/users/-", "value": {"name": "New User"}}]
+
+using JSONPatch  # Or implement minimal version
+
+function compute_patch(old_state, new_state)
+    # Returns array of patch operations
+end
+
+function apply_patch(state, patch)
+    # Applies patch operations to state
+end
+```
+
+**Files:** `src/Server/JSONPatch.jl`
+
+### WebSocket Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Server (Julia)                        │
+├─────────────────────────────────────────────────────────────┤
+│  SignalRegistry          ChannelRegistry                     │
+│  ┌──────────────┐       ┌──────────────┐                    │
+│  │ visitors: 42 │       │ chat: [...]  │                    │
+│  │ doc: {...}   │       │ events: [...]│                    │
+│  └──────────────┘       └──────────────┘                    │
+│         │                      │                             │
+│         ▼                      ▼                             │
+│  ┌─────────────────────────────────────┐                    │
+│  │     WebSocket Connection Manager     │                    │
+│  │  - Connection registry               │                    │
+│  │  - JSON patch computation            │                    │
+│  │  - Broadcast to subscribers          │                    │
+│  └─────────────────────────────────────┘                    │
+│                    │                                         │
+└────────────────────┼─────────────────────────────────────────┘
+                     │ WebSocket (JSON patches)
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Client (Browser)                        │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────┐                    │
+│  │         Hydration JS Layer           │                    │
+│  │  - WebSocket connection              │                    │
+│  │  - Patch application                 │                    │
+│  │  - Signal sync to Wasm               │                    │
+│  └─────────────────────────────────────┘                    │
+│                    │                                         │
+│                    ▼                                         │
+│  ┌─────────────────────────────────────┐                    │
+│  │           Wasm Module                │                    │
+│  │  ┌─────────────┐ ┌─────────────┐    │                    │
+│  │  │ signal_0: 42│ │ handlers    │    │                    │
+│  │  │ signal_1:...│ │ (compiled)  │    │                    │
+│  │  └─────────────┘ └─────────────┘    │                    │
+│  └─────────────────────────────────────┘                    │
+│                    │                                         │
+│                    ▼                                         │
+│              DOM Updates                                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Priority Order
+
+1. **WebSocket connection + auto-reconnect** - Foundation
+2. **Server signals (read-only)** - Most common use case
+3. **JSON patch protocol** - Efficiency for all signal types
+4. **Bidirectional signals** - Collaborative features
+5. **Channel signals** - Messaging patterns
+6. **Server function streaming** - Advanced use cases
 
 ---
 

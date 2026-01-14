@@ -10,6 +10,9 @@
 #     posts/
 #       [...slug].jl  -> /posts/*    (catch-all)
 
+# Include client-side router functionality
+include("ClientRouter.jl")
+
 """
 Represents a route with its path pattern and handler.
 """
@@ -227,16 +230,31 @@ function load_route(route::Route)
 end
 
 """
-    NavLink(href::String, children...; class="", active_class="active")
+    NavLink(href::String, children...; class="", active_class="active", exact=false)
 
-Navigation link that highlights when active.
+Navigation link that uses client-side routing and highlights when active.
+
+# Arguments
+- `href`: The destination path
+- `class`: CSS classes to apply to the link
+- `active_class`: CSS class added when link matches current route (default: "active")
+- `exact`: Only match path exactly, not prefix match (default: false)
+
+# Example
+```julia
+NavLink("/about", "About Us")
+NavLink("/", :class => "nav-item", :exact => true, "Home")
+```
 """
-function NavLink(href::String, children...; class::String="", active_class::String="active", kwargs...)
+function NavLink(href::String, children...; class::String="", active_class::String="active", exact::Bool=false, kwargs...)
     props = Dict{Symbol, Any}(kwargs...)
     props[:href] = href
     props[:class] = class
     props[:data_navlink] = "true"
     props[:data_active_class] = active_class
+    if exact
+        props[:data_exact] = "true"
+    end
     VNode(:a, props, collect(Any, children))
 end
 

@@ -323,14 +323,10 @@ function compile_interactive_components(app::App; for_build::Bool=false)::Vector
 
         println("  Compiling $(ic.name)...")
 
-        # Compile with container selector for scoped DOM queries
-        # Use invokelatest to handle world age issues from dynamic loading
-        result = Base.invokelatest(compile_component, ic.component; container_selector=ic.container_selector)
-
         # Generate unique wasm filename
         wasm_filename = "$(lowercase(ic.name)).wasm"
 
-        # Adjust hydration JS to use correct wasm path
+        # Determine wasm path for hydration JS
         # In dev mode: use root-relative path (/)
         # In build mode: use base_path for GitHub Pages subpaths
         wasm_path = if for_build && !isempty(app.base_path)
@@ -338,7 +334,15 @@ function compile_interactive_components(app::App; for_build::Bool=false)::Vector
         else
             "/$wasm_filename"
         end
-        js = replace(result.hydration.js, "./app.wasm" => wasm_path)
+
+        # Compile with container selector for scoped DOM queries
+        # Use invokelatest to handle world age issues from dynamic loading
+        result = Base.invokelatest(compile_component, ic.component;
+            container_selector=ic.container_selector,
+            component_name=ic.name,
+            wasm_path=wasm_path)
+
+        js = result.hydration.js
 
         push!(compiled, CompiledInteractive(
             ic,
@@ -360,14 +364,17 @@ end
 # =============================================================================
 
 """
-Generate full HTML page with injected components.
+Generate full HTML page or partial content with injected components.
+
+If `partial=true`, returns just the content area (for client-side navigation).
 """
 function generate_page(
     app::App,
     route_path::String,
     component_fn::Function,
     compiled_components::Vector{CompiledInteractive};
-    for_build::Bool=false
+    for_build::Bool=false,
+    partial::Bool=false
 )
     # Render the route component
     # Islands render directly as <therapy-island> elements via SSR
@@ -401,6 +408,20 @@ function generate_page(
 
     # Only include hydration JS for islands actually used on this page
     all_js = join([cc.js for cc in compiled_components if cc.component.name in islands_used], "\n\n")
+
+    # For partial requests (client-side navigation), return just content + scripts
+    # Note: Content replaces innerHTML of #therapy-content, so don't wrap it again
+    if partial
+        partial_html = content
+        if !isempty(all_js)
+            partial_html *= """
+<script>
+$(all_js)
+</script>
+"""
+        end
+        return partial_html
+    end
 
     # Generate page title
     page_title = if route_path == "/"
@@ -473,7 +494,9 @@ function generate_page(
     html *= """
 </head>
 <body class="antialiased">
+<div id="therapy-content">
 $(content)
+</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-julia.min.js"></script>
 """
@@ -484,6 +507,12 @@ $(content)
 $(all_js)
     </script>
 """
+    end
+
+    # Include client-side router script (unless building static site)
+    if !for_build
+        router_js = render_to_string(client_router_script(content_selector="#therapy-content", base_path=app.base_path))
+        html *= router_js
     end
 
     html *= """
@@ -602,6 +631,9 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
         path = HTTP.URI(request.target).path
         path = path == "" ? "/" : path
 
+        # Check if this is a partial request (for client-side navigation)
+        is_partial = any(h -> lowercase(String(h.first)) == "x-therapy-partial" && String(h.second) == "1", request.headers)
+
         # Serve Wasm files
         for cc in compiled_components
             if path == "/$(cc.wasm_filename)"
@@ -617,7 +649,7 @@ function dev(app::App; port::Int=8080, host::String="127.0.0.1")
 
             if route_match
                 try
-                    html = Base.invokelatest(generate_page, app, String(path), component_fn, compiled_components)
+                    html = Base.invokelatest(generate_page, app, String(path), component_fn, compiled_components; partial=is_partial)
                     return HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"], html)
                 catch e
                     @error "Error rendering page" exception=(e, catch_backtrace())

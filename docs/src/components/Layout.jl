@@ -63,10 +63,12 @@ function Layout(children...; title="Therapy.jl")
 end
 
 """
-Navigation item component with dark mode support.
+Navigation item component with client-side routing and active state support.
 """
 function NavItem(href, label)
-    A(:href => href,
-      :class => "text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white px-3 py-2 text-sm font-medium transition-colors",
-      label)
+    # Use NavLink for client-side routing with active class support
+    NavLink(href, label;
+        class = "text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white px-3 py-2 text-sm font-medium transition-colors",
+        active_class = "text-emerald-700 dark:text-emerald-400"
+    )
 end
