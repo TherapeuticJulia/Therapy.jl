@@ -29,8 +29,10 @@ function client_router_script(; content_selector::String="#page-content", base_p
         contentSelector: '$(content_selector)',
         basePath: '$(base_path)',
         partialHeader: 'X-Therapy-Partial',
-        debug: false
+        debug: true
     };
+
+    console.log('[Router] Script loaded, initializing...');
 
     // Track current navigation to cancel on rapid clicks
     let currentNavigation = null;
@@ -283,14 +285,25 @@ function client_router_script(; content_selector::String="#page-content", base_p
      * Handle click events on links
      */
     function handleLinkClick(event) {
+        console.log('[Router] Click detected on:', event.target.tagName);
+
         // Find the closest anchor tag
         const link = event.target.closest('a[href]');
-        if (!link) return;
+        if (!link) {
+            console.log('[Router] No link found');
+            return;
+        }
 
         const href = link.getAttribute('href');
+        console.log('[Router] Link href:', href);
 
         // Check if we should handle this link
-        if (!isInternalLink(href, link)) return;
+        if (!isInternalLink(href, link)) {
+            console.log('[Router] Not internal link, skipping');
+            return;
+        }
+
+        console.log('[Router] Intercepting navigation to:', href);
 
         // Prevent default navigation
         event.preventDefault();
