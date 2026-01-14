@@ -94,9 +94,13 @@ function client_router_script(; content_selector::String="#page-content", base_p
             return new URL(href).pathname;
         }
 
-        // Relative path - resolve against current location
-        const base = window.location.pathname.replace(/\\/[^\\/]*\$/, '/');
-        const resolved = new URL(href, window.location.origin + base).pathname;
+        // Relative path - resolve against <base href> tag, NOT current URL
+        // This is critical for SPA: after navigation, current URL changes but
+        // ./ links should still resolve against the base path
+        const baseEl = document.querySelector('base[href]');
+        const basePath = baseEl ? baseEl.getAttribute('href') : '/';
+        const resolved = new URL(href, window.location.origin + basePath).pathname;
+        console.log('[Router] Resolved', href, 'against base', basePath, '->', resolved);
         return resolved;
     }
 
