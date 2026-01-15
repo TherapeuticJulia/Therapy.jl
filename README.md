@@ -222,7 +222,3 @@ See Therapy.jl in action at [therapeuticjulia.github.io/Therapy.jl](https://ther
 ## Related Projects
 
 - [WasmTarget.jl](https://github.com/TherapeuticJulia/WasmTarget.jl) - Julia to WebAssembly compiler
-
-## License
-
-MIT
