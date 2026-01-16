@@ -18,14 +18,16 @@ struct SiteConfig
     title::String
     use_tailwind_cdn::Bool
     include_prism::Bool
+    base_path::String
 
     function SiteConfig(;
         output_dir::String = "dist",
         title::String = "Therapy.jl Site",
         use_tailwind_cdn::Bool = true,
-        include_prism::Bool = true
+        include_prism::Bool = true,
+        base_path::String = ""
     )
-        new(output_dir, title, use_tailwind_cdn, include_prism)
+        new(output_dir, title, use_tailwind_cdn, include_prism, rstrip(base_path, '/'))
     end
 end
 
@@ -224,7 +226,7 @@ function build_static_site(routes::Vector; config::SiteConfig = SiteConfig())
         <div class="text-center">
             <h1 class="text-6xl font-bold text-gray-300">404</h1>
             <p class="text-xl text-gray-600 mt-4">Page not found</p>
-            <a href="/" class="inline-block mt-6 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">Go Home</a>
+            <a href="$(isempty(config.base_path) ? "/" : config.base_path * "/")" class="inline-block mt-6 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-500 transition">Go Home</a>
         </div>
     </div>
 </body>

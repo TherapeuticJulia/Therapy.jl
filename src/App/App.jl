@@ -836,7 +836,7 @@ function build(app::App)
         <div class="text-center">
             <h1 class="text-6xl font-serif font-semibold text-stone-300 dark:text-neutral-700">404</h1>
             <p class="text-xl text-neutral-600 dark:text-neutral-400 mt-4">Page not found</p>
-            <a href="/" class="inline-block mt-6 px-6 py-3 bg-emerald-700 dark:bg-emerald-600 text-white rounded hover:bg-emerald-800 dark:hover:bg-emerald-500 transition">
+            <a href="$(isempty(app.base_path) ? "/" : app.base_path * "/")" class="inline-block mt-6 px-6 py-3 bg-emerald-700 dark:bg-emerald-600 text-white rounded hover:bg-emerald-800 dark:hover:bg-emerald-500 transition">
                 Go Home
             </a>
         </div>
