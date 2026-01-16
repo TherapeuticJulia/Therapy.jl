@@ -338,15 +338,61 @@ function websocket_client_script(;
 
     /**
      * Update DOM elements with data-server-signal or data-bidirectional-signal attribute
+     * Leptos-style reactive bindings:
+     * - data-server-signal="name" - updates textContent/value
+     * - data-signal-html="name" - updates innerHTML (for rich content)
+     * - data-signal-class="name:class1,class2" - adds classes when signal is truthy
+     * - data-signal-match="name:value:class" - adds class when signal equals value
      */
     function updateSignalDOM(signalName, value) {
-        // Update read-only server signal elements
+        // Update read-only server signal elements (textContent)
         document.querySelectorAll('[data-server-signal="' + signalName + '"]').forEach(function(el) {
             if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
                 el.value = value;
             } else {
                 el.textContent = value;
             }
+        });
+
+        // Update innerHTML bindings (for rich HTML content like cell output)
+        document.querySelectorAll('[data-signal-html="' + signalName + '"]').forEach(function(el) {
+            el.innerHTML = value || '';
+            // Show/hide based on content
+            if (el.hasAttribute('data-signal-hide-empty')) {
+                el.classList.toggle('hidden', !value);
+            }
+        });
+
+        // Update class bindings (add classes when signal is truthy)
+        document.querySelectorAll('[data-signal-class^="' + signalName + ':"]').forEach(function(el) {
+            const binding = el.getAttribute('data-signal-class');
+            const [, classes] = binding.split(':');
+            if (classes) {
+                const classList = classes.split(',').map(c => c.trim()).filter(c => c);
+                if (value) {
+                    el.classList.add(...classList);
+                } else {
+                    el.classList.remove(...classList);
+                }
+            }
+        });
+
+        // Update match bindings (add class when signal equals specific value)
+        // Format: data-signal-match="signalName:matchValue:className"
+        document.querySelectorAll('[data-signal-match]').forEach(function(el) {
+            const bindings = el.getAttribute('data-signal-match').split(';');
+            bindings.forEach(function(binding) {
+                const parts = binding.trim().split(':');
+                if (parts.length >= 3 && parts[0] === signalName) {
+                    const matchValue = parts[1];
+                    const className = parts[2];
+                    if (String(value) === matchValue) {
+                        el.classList.add(className);
+                    } else {
+                        el.classList.remove(className);
+                    }
+                }
+            });
         });
 
         // Update bidirectional signal elements (only if not focused, to avoid cursor jump)
@@ -658,11 +704,52 @@ function websocket_client_script(;
         onChannelMessage: onChannelMessage
     };
 
+    /**
+     * Handle data-action clicks (Leptos-style server actions)
+     * Elements with data-action="channelName" send channel messages on click
+     * Additional data-* attributes are included in the message payload
+     */
+    function setupActionHandlers() {
+        document.addEventListener('click', function(e) {
+            const el = e.target.closest('[data-action]');
+            if (!el) return;
+
+            const action = el.getAttribute('data-action');
+            if (!action) return;
+
+            // Collect all data-* attributes as payload
+            const payload = {};
+            for (const attr of el.attributes) {
+                if (attr.name.startsWith('data-') && attr.name !== 'data-action') {
+                    // Convert data-cell-id to cell_id
+                    const key = attr.name.substring(5).replace(/-/g, '_');
+                    payload[key] = attr.value;
+                }
+            }
+
+            // Check for confirmation
+            if (el.hasAttribute('data-confirm')) {
+                const msg = el.getAttribute('data-confirm');
+                if (!confirm(msg)) return;
+            }
+
+            // Send channel message
+            sendMessage(action, payload);
+
+            // Prevent default for links/buttons
+            e.preventDefault();
+        });
+    }
+
     // Auto-connect when DOM is ready
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', connect);
+        document.addEventListener('DOMContentLoaded', function() {
+            connect();
+            setupActionHandlers();
+        });
     } else {
         connect();
+        setupActionHandlers();
     }
 })();
 </script>

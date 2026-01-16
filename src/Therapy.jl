@@ -21,6 +21,9 @@ include("Components/Lifecycle.jl")
 # SSR
 include("SSR/Render.jl")
 
+# External Library Support (depends on SSR/Render.jl for RawHtml)
+include("Components/ExternalLibrary.jl")
+
 # Router
 include("Router/Router.jl")
 
@@ -72,6 +75,10 @@ export island, IslandDef, IslandVNode, get_islands, clear_islands!, is_island
 
 # Exports - Lifecycle
 export on_mount, on_cleanup
+
+# Exports - External Libraries
+export register_external_library, external_library_script, register_codemirror_pluto
+export ExternalLibraryConfig, EXTERNAL_LIBRARIES
 
 # Exports - SSR
 export render_to_string, render_page
